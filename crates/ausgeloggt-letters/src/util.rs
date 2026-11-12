@@ -15,7 +15,7 @@ pub(crate) fn fmt_datetime(d: DateTime<Utc>) -> String {
 }
 
 pub(crate) fn fmt_opt_datetime(d: Option<DateTime<Utc>>) -> String {
-    d.map(fmt_datetime).unwrap_or_else(|| "–".into())
+    d.map(fmt_datetime).unwrap_or_else(|| "keine Angabe".into())
 }
 
 /// Amount in minor units as German money string, e.g. `9,99 €`.

@@ -100,11 +100,13 @@ fn check_recipient(r: &Party) -> Result<(), LetterError> {
 
 fn one_month(now: DateTime<Utc>) -> DateTime<Utc> {
     now.checked_add_months(Months::new(1))
-        .unwrap_or(now + Duration::days(30))
+        .or_else(|| now.checked_add_signed(Duration::days(30)))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 fn two_weeks(now: DateTime<Utc>) -> DateTime<Utc> {
-    now + Duration::days(14)
+    now.checked_add_signed(Duration::days(14))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 fn identifiers(account: Option<&Account>) -> Vec<String> {
@@ -319,7 +321,9 @@ pub fn cease_and_desist(
                     fmt_opt_datetime(m.date),
                     m.from.clone(),
                     m.subject.clone(),
-                    m.message_id.clone().unwrap_or_else(|| "–".into()),
+                    m.message_id
+                        .clone()
+                        .unwrap_or_else(|| "keine Angabe".into()),
                 ]
             })
             .collect();
@@ -498,7 +502,7 @@ pub fn cancellation(
         recipient,
         now,
         Draft {
-            subject: format!("Kündigung zum nächstmöglichen Zeitpunkt – {}", account.name),
+            subject: format!("Kündigung zum nächstmöglichen Zeitpunkt: {}", account.name),
             reference: reference_for(Some(account)),
             paragraphs: paras,
             attachments: Vec::new(),
@@ -736,7 +740,9 @@ pub fn complaint(
                 r.kind.label_de().to_string(),
                 channel_label(r.channel).to_string(),
                 r.target.clone(),
-                r.deadline.map(fmt_date).unwrap_or_else(|| "–".into()),
+                r.deadline
+                    .map(fmt_date)
+                    .unwrap_or_else(|| "keine Angabe".into()),
                 r.status.label_de().to_string(),
             ]
         })

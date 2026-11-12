@@ -399,7 +399,8 @@ export interface SnapshotDto {
 
 // ---- insights ---------------------------------------------------------------------
 
-export type BillingInterval = "Weekly" | "Monthly" | "Quarterly" | "HalfYearly" | "Yearly";
+export type BillingInterval =
+  | "Weekly" | "BiWeekly" | "Monthly" | "BiMonthly" | "Quarterly" | "FourMonthly" | "HalfYearly" | "Yearly";
 
 export interface BillingSummary {
   account_id: Uuid;
@@ -452,6 +453,8 @@ export interface PrivacyScore {
   high_risk_accounts: number;
   pending_requests: number;
   overdue_requests: number;
+  /** false until anything was scanned or imported: show "noch keine Daten", not a score */
+  has_data: boolean;
 }
 
 export interface AliasAdvice {

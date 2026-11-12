@@ -18,8 +18,14 @@ use crate::model::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BillingInterval {
     Weekly,
+    /// Every two weeks.
+    BiWeekly,
     Monthly,
+    /// Every two months.
+    BiMonthly,
     Quarterly,
+    /// Every four months.
+    FourMonthly,
     HalfYearly,
     Yearly,
 }
@@ -28,8 +34,11 @@ impl BillingInterval {
     pub fn label_de(self) -> &'static str {
         match self {
             BillingInterval::Weekly => "wöchentlich",
+            BillingInterval::BiWeekly => "alle zwei Wochen",
             BillingInterval::Monthly => "monatlich",
+            BillingInterval::BiMonthly => "alle zwei Monate",
             BillingInterval::Quarterly => "vierteljährlich",
+            BillingInterval::FourMonthly => "alle vier Monate",
             BillingInterval::HalfYearly => "halbjährlich",
             BillingInterval::Yearly => "jährlich",
         }
@@ -39,8 +48,11 @@ impl BillingInterval {
     fn days(self) -> i64 {
         match self {
             BillingInterval::Weekly => 7,
+            BillingInterval::BiWeekly => 14,
             BillingInterval::Monthly => 30,
+            BillingInterval::BiMonthly => 61,
             BillingInterval::Quarterly => 91,
+            BillingInterval::FourMonthly => 122,
             BillingInterval::HalfYearly => 182,
             BillingInterval::Yearly => 365,
         }
@@ -50,17 +62,24 @@ impl BillingInterval {
     fn per_year(self) -> i64 {
         match self {
             BillingInterval::Weekly => 52,
+            BillingInterval::BiWeekly => 26,
             BillingInterval::Monthly => 12,
+            BillingInterval::BiMonthly => 6,
             BillingInterval::Quarterly => 4,
+            BillingInterval::FourMonthly => 3,
             BillingInterval::HalfYearly => 2,
             BillingInterval::Yearly => 1,
         }
     }
 
-    const ALL: [BillingInterval; 5] = [
+    /// Ascending, so overlapping tolerance bands resolve to the shorter interval.
+    const ALL: [BillingInterval; 8] = [
         BillingInterval::Weekly,
+        BillingInterval::BiWeekly,
         BillingInterval::Monthly,
+        BillingInterval::BiMonthly,
         BillingInterval::Quarterly,
+        BillingInterval::FourMonthly,
         BillingInterval::HalfYearly,
         BillingInterval::Yearly,
     ];
@@ -177,8 +196,14 @@ pub fn billing_summary(account: &Account, now: DateTime<Utc>) -> Option<BillingS
     if account.payments.is_empty() {
         return None;
     }
-    // Newest first; undated records last.
-    let mut recs: Vec<&PaymentRecord> = account.payments.iter().collect();
+    // Newest first; undated records last. Records dated more than a day in the
+    // future (bogus Date headers) are ignored.
+    let horizon = now + Duration::days(1);
+    let mut recs: Vec<&PaymentRecord> = account
+        .payments
+        .iter()
+        .filter(|r| r.date.is_none_or(|d| d <= horizon))
+        .collect();
     recs.sort_by_key(|r| std::cmp::Reverse(r.date));
 
     // Charge series ascending, one per calendar day.
@@ -208,7 +233,13 @@ pub fn billing_summary(account: &Account, now: DateTime<Utc>) -> Option<BillingS
         if gaps.is_empty() {
             None
         } else {
-            BillingInterval::from_median_days(median(&gaps))
+            // The median picks the candidate; at least 60 % of the gaps must fit it
+            // (±20 %), so irregular one-off purchases are not mistaken for a plan.
+            BillingInterval::from_median_days(median(&gaps)).filter(|i| {
+                let n = i.days() as f64;
+                let fitting = gaps.iter().filter(|g| (*g - n).abs() <= n * 0.2).count();
+                fitting * 5 >= gaps.len() * 3
+            })
         }
     } else {
         None
@@ -259,7 +290,7 @@ pub fn billing_summary(account: &Account, now: DateTime<Utc>) -> Option<BillingS
     let amount_minor = latest.and_then(|r| r.amount_minor);
     let currency = latest.and_then(|r| r.currency.clone());
     let monthly_minor = match (amount_minor, interval) {
-        (Some(a), Some(i)) => Some((a * i.per_year() + 6) / 12),
+        (Some(a), Some(i)) => Some(a.saturating_mul(i.per_year()).saturating_add(6) / 12),
         _ => None,
     };
 
@@ -316,7 +347,8 @@ pub fn billing_summary(account: &Account, now: DateTime<Utc>) -> Option<BillingS
             PaymentKind::Refund => -a.abs(),
             _ => continue,
         };
-        *spent.entry(c.to_uppercase()).or_insert(0) += signed;
+        let e = spent.entry(c.to_uppercase()).or_insert(0);
+        *e = e.saturating_add(signed);
     }
 
     Some(BillingSummary {
@@ -363,8 +395,8 @@ pub fn subscription_totals(data: &VaultData, now: DateTime<Utc>) -> Vec<(String,
             continue;
         };
         let e = totals.entry(cur.to_uppercase()).or_insert((0, 0, 0));
-        e.0 += monthly;
-        e.1 += amount * i.per_year();
+        e.0 = e.0.saturating_add(monthly);
+        e.1 = e.1.saturating_add(amount.saturating_mul(i.per_year()));
         e.2 += 1;
     }
     totals
@@ -739,6 +771,10 @@ pub struct PrivacyScore {
     pub high_risk_accounts: usize,
     pub pending_requests: usize,
     pub overdue_requests: usize,
+    /// false until at least one source has been scanned or imported, or any account
+    /// exists. The UI shows "noch keine Daten" instead of a score then.
+    #[serde(default)]
+    pub has_data: bool,
 }
 
 /// Risk score from which an account counts as "high risk".
@@ -771,6 +807,22 @@ fn share(good: usize, total: usize) -> f64 {
 /// - "Anfragen beantwortet" 10: sent requests that were answered / done / rejected
 /// - "Fristen eingehalten" 10: 10 minus 5 per overdue request
 pub fn privacy_score(data: &VaultData, ctx: &RiskContext, now: DateTime<Utc>) -> PrivacyScore {
+    if data.accounts.is_empty()
+        && data.runs.is_empty()
+        && data.subscriptions.is_empty()
+        && data.requests.is_empty()
+    {
+        return PrivacyScore {
+            score: 0,
+            parts: Vec::new(),
+            open_accounts: 0,
+            deleted_accounts: 0,
+            high_risk_accounts: 0,
+            pending_requests: 0,
+            overdue_requests: 0,
+            has_data: false,
+        };
+    }
     let open: Vec<&Account> = data.accounts.iter().filter(|a| is_open(a)).collect();
     let deleted_accounts = data
         .accounts
@@ -923,6 +975,7 @@ pub fn privacy_score(data: &VaultData, ctx: &RiskContext, now: DateTime<Utc>) ->
         high_risk_accounts,
         pending_requests,
         overdue_requests: overdue,
+        has_data: true,
     }
 }
 
@@ -1769,10 +1822,11 @@ mod tests {
 
     #[test]
     fn privacy_score_bounds_and_parts() {
+        // A brand-new vault has no score yet (UI: "noch keine Daten").
         let empty = privacy_score(&VaultData::default(), &RiskContext::default(), now());
-        assert_eq!(empty.score, 100);
-        assert_eq!(empty.parts.iter().map(|p| p.2).sum::<u32>(), 100);
-        assert!(empty.parts.iter().all(|p| p.1 <= p.2));
+        assert!(!empty.has_data);
+        assert_eq!(empty.score, 0);
+        assert!(empty.parts.is_empty());
 
         // Worst case: everything wrong.
         let mut accounts = Vec::new();

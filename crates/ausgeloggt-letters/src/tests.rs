@@ -496,6 +496,7 @@ fn demo_score() -> PrivacyScore {
         high_risk_accounts: 1,
         pending_requests: 1,
         overdue_requests: 1,
+        has_data: true,
     }
 }
 

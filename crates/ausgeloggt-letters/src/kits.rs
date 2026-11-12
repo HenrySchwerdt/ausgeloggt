@@ -184,7 +184,7 @@ pub fn emergency_kit_pdf(
             if let Some(p) = active_recurring(a) {
                 let mut s = p.plan.clone().unwrap_or_else(|| "Abonnement".into());
                 if let Some(m) = money_of(p) {
-                    s.push_str(&format!(" – {m}"));
+                    s.push_str(&format!(": {m}"));
                 }
                 if let Some(d) = p.date {
                     s.push_str(&format!(" (zuletzt {})", fmt_date(d)));
@@ -419,12 +419,12 @@ pub fn privacy_report_pdf(
             }
             rows.push(vec![
                 a.name.clone(),
-                p.plan.clone().unwrap_or_else(|| "–".into()),
-                money_of(p).unwrap_or_else(|| "–".into()),
+                p.plan.clone().unwrap_or_else(|| "keine Angabe".into()),
+                money_of(p).unwrap_or_else(|| "keine Angabe".into()),
                 p.method
                     .as_ref()
-                    .map_or_else(|| "–".into(), |m| m.label_de()),
-                p.date.map_or_else(|| "–".into(), fmt_date),
+                    .map_or_else(|| "keine Angabe".into(), |m| m.label_de()),
+                p.date.map_or_else(|| "keine Angabe".into(), fmt_date),
             ]);
         }
         c.table(
@@ -467,8 +467,8 @@ pub fn privacy_report_pdf(
                 vec![
                     r.target.clone(),
                     r.kind.label_de().to_string(),
-                    r.sent_at.map_or_else(|| "–".into(), fmt_date),
-                    r.deadline.map_or_else(|| "–".into(), fmt_date),
+                    r.sent_at.map_or_else(|| "keine Angabe".into(), fmt_date),
+                    r.deadline.map_or_else(|| "keine Angabe".into(), fmt_date),
                     if overdue {
                         "überfällig".to_string()
                     } else {

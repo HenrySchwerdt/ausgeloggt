@@ -83,7 +83,7 @@ pub fn erasure_request(account: &Account, settings: &Settings, to: Option<&str>)
     let ids = identifier_block(account, en);
     let (subject, body) = if en {
         (
-            format!("Request for erasure of personal data pursuant to Art. 17 GDPR – {name}"),
+            format!("Request for erasure of personal data pursuant to Art. 17 GDPR ({name})"),
             format!(
                 "Dear Sir or Madam,\n\n\
                  pursuant to Art. 17(1) of the General Data Protection Regulation (GDPR), I request that you erase without undue delay all personal data concerning me, and delete my user account.\n\n\
@@ -102,7 +102,7 @@ pub fn erasure_request(account: &Account, settings: &Settings, to: Option<&str>)
         )
     } else {
         (
-            format!("Antrag auf Löschung personenbezogener Daten gemäß Art. 17 DSGVO – {name}"),
+            format!("Antrag auf Löschung personenbezogener Daten gemäß Art. 17 DSGVO ({name})"),
             format!(
                 "Sehr geehrte Damen und Herren,\n\n\
                  gemäß Art. 17 Abs. 1 der Datenschutz-Grundverordnung (DSGVO) beantrage ich die unverzügliche Löschung aller mich betreffenden personenbezogenen Daten sowie die Löschung meines Nutzerkontos.\n\n\
@@ -144,7 +144,7 @@ pub fn reminder(
     let final_deadline = fmt_date(Utc::now() + Duration::days(14), en);
     let (subject, body) = if en {
         (
-            format!("Reminder: request for erasure pursuant to Art. 17 GDPR of {sent} – {name}"),
+            format!("Reminder: request for erasure pursuant to Art. 17 GDPR of {sent} ({name})"),
             format!(
                 "Dear Sir or Madam,\n\n\
                  on {sent} I asked you, pursuant to Art. 17 GDPR, to erase all personal data concerning me (service: {svc}). The one-month period under Art. 12(3) GDPR expired on {expired}. I have not received a response or confirmation of erasure.\n\n\
@@ -156,7 +156,7 @@ pub fn reminder(
         )
     } else {
         (
-            format!("Erinnerung: Antrag auf Löschung gemäß Art. 17 DSGVO vom {sent} – {name}"),
+            format!("Erinnerung: Antrag auf Löschung gemäß Art. 17 DSGVO vom {sent} ({name})"),
             format!(
                 "Sehr geehrte Damen und Herren,\n\n\
                  am {sent} habe ich Sie gemäß Art. 17 DSGVO aufgefordert, alle mich betreffenden personenbezogenen Daten zu löschen (Dienst: {svc}). Die Monatsfrist nach Art. 12 Abs. 3 DSGVO ist am {expired} abgelaufen. Eine Antwort oder Löschbestätigung habe ich bislang nicht erhalten.\n\n\
@@ -211,7 +211,8 @@ pub fn deadline_from(sent_at: DateTime<Utc>) -> DateTime<Utc> {
     // chrono clamps to the last day of the month (Jan 31 -> Feb 28/29).
     sent_at
         .checked_add_months(Months::new(1))
-        .unwrap_or(sent_at + Duration::days(31))
+        .or_else(|| sent_at.checked_add_signed(Duration::days(31)))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 #[cfg(test)]
@@ -265,7 +266,7 @@ mod tests {
         assert_eq!(l.to.as_deref(), Some("privacy@spotify.com"));
         assert_eq!(
             l.subject,
-            "Antrag auf Löschung personenbezogener Daten gemäß Art. 17 DSGVO – Max Mustermann"
+            "Antrag auf Löschung personenbezogener Daten gemäß Art. 17 DSGVO (Max Mustermann)"
         );
         for needle in [
             "max@example.org",
