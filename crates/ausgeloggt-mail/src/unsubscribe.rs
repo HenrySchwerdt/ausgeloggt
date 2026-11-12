@@ -267,7 +267,12 @@ pub fn parse_list_unsubscribe(header: &str, post_header: Option<&str>) -> Vec<Un
 
     let mut out: Vec<UnsubscribeMethod> = Vec::new();
     let mut have_one_click = false;
+    let mut seen_uris: std::collections::HashSet<String> = std::collections::HashSet::new();
     for uri in uris {
+        // The same URI listed twice must not become both a one-click and a plain link.
+        if !seen_uris.insert(uri.to_lowercase()) {
+            continue;
+        }
         let method = if starts_with_ci(&uri, "mailto:") {
             parse_mailto(&uri[7..])
         } else if starts_with_ci(&uri, "https://") && uri.len() > 8 {

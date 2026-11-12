@@ -55,6 +55,10 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
     let mut derived_name: HashSet<usize> = HashSet::new();
     let mut created: HashSet<usize> = HashSet::new();
     let mut updated: HashSet<usize> = HashSet::new();
+    let mut touched: HashSet<usize> = HashSet::new();
+    // Evidence keys per account (built lazily), so dedup is O(1) per finding.
+    let mut keys: HashMap<usize, HashSet<EvKey>> = HashMap::new();
+    let mut id_keys: HashMap<usize, HashSet<String>> = HashMap::new();
     let now = Utc::now();
 
     for f in findings {
@@ -72,6 +76,10 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
                 continue;
             }
             Resolution::Existing(i) => (i, false, false),
+            Resolution::Adopt(i, key) => {
+                index.adopt(data, i, key);
+                (i, false, false)
+            }
             Resolution::New(key) => {
                 let (i, derived) = index.create(data, key, explicit_name.as_deref(), now);
                 created.insert(i);
@@ -97,7 +105,10 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
         }
 
         // Evidence (deduplicated).
-        if evidence_exists(&acct.evidence, &f.evidence) {
+        let ev_keys = keys
+            .entry(idx)
+            .or_insert_with(|| acct.evidence.iter().map(ev_key).collect());
+        if !ev_keys.insert(ev_key(&f.evidence)) {
             report.skipped += 1;
         } else {
             if let Some(d) = f.evidence.date {
@@ -119,11 +130,10 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            if !acct
-                .identifiers
-                .iter()
-                .any(|x| x.eq_ignore_ascii_case(id) || x.to_lowercase() == id.to_lowercase())
-            {
+            let ids = id_keys
+                .entry(idx)
+                .or_insert_with(|| acct.identifiers.iter().map(|x| x.to_lowercase()).collect());
+            if ids.insert(id.to_lowercase()) {
                 acct.identifiers.push(id.to_string());
                 changed = true;
             }
@@ -137,20 +147,21 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
             }
         }
 
-        if changed {
-            let c = confidence(&acct.evidence);
+        if changed && !is_new {
+            acct.updated_at = now;
+            updated.insert(idx);
+        }
+        touched.insert(idx);
+    }
+
+    // Confidence is recomputed once per touched account (it only depends on the set of kinds).
+    for idx in touched {
+        let acct = &mut data.accounts[idx];
+        let c = confidence(&acct.evidence);
+        if (c - acct.confidence).abs() > f32::EPSILON {
             acct.confidence = c;
-            if !is_new {
+            if !created.contains(&idx) && updated.insert(idx) {
                 acct.updated_at = now;
-                updated.insert(idx);
-            }
-        } else if !is_new {
-            // Keep stored confidence consistent without touching updated_at semantics.
-            let c = confidence(&acct.evidence);
-            if (c - acct.confidence).abs() > f32::EPSILON {
-                acct.confidence = c;
-                acct.updated_at = now;
-                updated.insert(idx);
             }
         }
     }
@@ -165,6 +176,8 @@ enum Resolution {
     /// Unparsable or infrastructure domain: ignore.
     Skip,
     Existing(usize),
+    /// Existing `unresolved:` account that now gets this real domain.
+    Adopt(usize, String),
     /// No account yet; carries the grouping key to create it under.
     New(String),
 }
@@ -174,17 +187,27 @@ enum Resolution {
 struct AccountIndex {
     by_domain: HashMap<String, usize>,
     by_name: HashMap<String, usize>,
+    /// Accounts whose domain is still an `unresolved:` key.
+    unresolved: HashSet<usize>,
 }
 
 impl AccountIndex {
     fn new(accounts: &[Account]) -> Self {
         let mut by_domain = HashMap::with_capacity(accounts.len());
         let mut by_name = HashMap::new();
+        let mut unresolved = HashSet::new();
         for (i, a) in accounts.iter().enumerate() {
             by_domain.entry(a.domain.clone()).or_insert(i);
             by_name.entry(a.name.trim().to_lowercase()).or_insert(i);
+            if a.domain.starts_with(UNRESOLVED_PREFIX) {
+                unresolved.insert(i);
+            }
         }
-        Self { by_domain, by_name }
+        Self {
+            by_domain,
+            by_name,
+            unresolved,
+        }
     }
 
     /// Grouping key for a domain: canonical registrable domain or, for
@@ -209,28 +232,47 @@ impl AccountIndex {
         let Some(key) = Self::key_for(domain, explicit_name) else {
             return Resolution::Skip;
         };
-        let mut target: Option<usize> = None;
+        // The exact key always wins (keeps re-imports stable, whatever the names are).
+        if let Some(i) = self.by_domain.get(&key).copied() {
+            return Resolution::Existing(i);
+        }
         if let Some(rest) = key.strip_prefix(UNRESOLVED_PREFIX) {
+            let mut target: Option<usize> = None;
             if let Some(n) = explicit_name {
                 target = self.by_name.get(&n.to_lowercase()).copied();
             }
             if target.is_none() {
                 target = self.by_name.get(rest).copied();
             }
+            return match target {
+                Some(i) => Resolution::Existing(i),
+                None => Resolution::New(key),
+            };
         }
-        if target.is_none() {
-            target = self.by_domain.get(&key).copied();
+        // A real domain whose name matches an account that so far only exists as
+        // `unresolved:<name>` (SSO grant, PayPal / Apple receipt): adopt that account.
+        let name = explicit_name
+            .map(str::to_lowercase)
+            .unwrap_or_else(|| display_name_for(&key).to_lowercase());
+        if let Some(&i) = self.by_name.get(name.trim()) {
+            if self.unresolved.contains(&i) {
+                return Resolution::Adopt(i, key);
+            }
         }
-        match target {
-            Some(i) => Resolution::Existing(i),
-            None => Resolution::New(key),
-        }
+        Resolution::New(key)
+    }
+
+    /// Give an `unresolved:` account its real domain (the old key keeps resolving to it).
+    fn adopt(&mut self, data: &mut VaultData, idx: usize, key: String) {
+        data.accounts[idx].domain = key.clone();
+        self.by_domain.insert(key, idx);
+        self.unresolved.remove(&idx);
     }
 
     /// Resolve only to an existing account (never creates).
     fn find(&self, domain: &str) -> Option<usize> {
         match self.resolve(domain, None) {
-            Resolution::Existing(i) => Some(i),
+            Resolution::Existing(i) | Resolution::Adopt(i, _) => Some(i),
             _ => None,
         }
     }
@@ -255,6 +297,9 @@ impl AccountIndex {
         acct.created_at = now;
         acct.updated_at = now;
         data.accounts.push(acct);
+        if key.starts_with(UNRESOLVED_PREFIX) {
+            self.unresolved.insert(i);
+        }
         self.by_domain.insert(key, i);
         self.by_name.entry(name.trim().to_lowercase()).or_insert(i);
         (i, derived)
@@ -269,19 +314,25 @@ fn capitalise(s: &str) -> String {
     }
 }
 
-fn evidence_exists(existing: &[Evidence], new: &Evidence) -> bool {
-    existing.iter().any(|e| {
-        if e.source != new.source {
-            return false;
-        }
-        match (&e.source_ref, &new.source_ref) {
-            (Some(a), Some(b)) => a == b,
-            (None, None) => e.kind == new.kind && e.summary == new.summary && e.date == new.date,
-            _ => false,
-        }
-    })
+/// Identity of an evidence entry for deduplication: (source, source_ref) when it has a
+/// reference, else (source, kind, summary, date).
+#[derive(Hash, PartialEq, Eq)]
+enum EvKey {
+    Ref(crate::model::SourceKind, String),
+    NoRef(
+        crate::model::SourceKind,
+        EvidenceKind,
+        String,
+        Option<DateTime<Utc>>,
+    ),
 }
 
+fn ev_key(e: &Evidence) -> EvKey {
+    match &e.source_ref {
+        Some(r) => EvKey::Ref(e.source.clone(), r.clone()),
+        None => EvKey::NoRef(e.source.clone(), e.kind, e.summary.clone(), e.date),
+    }
+}
 /// Fold scan observations into `data.subscriptions`, keyed by (mailbox, list_key):
 /// - message_count adds up only for new mails (the scan is incremental; observations
 ///   carry counts for *new* mails only)
@@ -350,7 +401,17 @@ pub fn merge_subscriptions(
                 let sub = &mut data.subscriptions[i];
                 let before = sub.clone();
 
-                sub.message_count += obs.message_count;
+                // A full rescan reports every mail again: its range covers what we already
+                // know and it counts at least as many mails. Replace instead of adding.
+                let covers_known = obs.message_count >= sub.message_count
+                    && sub.message_count > 0
+                    && matches!((obs.first_seen, sub.first_seen), (Some(o), Some(s)) if o <= s)
+                    && matches!((obs.last_seen, sub.last_seen), (Some(o), Some(s)) if o >= s);
+                if covers_known {
+                    sub.message_count = obs.message_count;
+                } else {
+                    sub.message_count += obs.message_count;
+                }
                 sub.first_seen = min_opt(sub.first_seen, obs.first_seen);
                 sub.last_seen = max_opt(sub.last_seen, obs.last_seen);
                 if !subjects.is_empty() {
@@ -471,6 +532,10 @@ pub fn merge_payments(
         let (idx, is_new) = match index.resolve(&obs.domain, explicit_name.as_deref()) {
             Resolution::Skip => continue,
             Resolution::Existing(i) => (i, false),
+            Resolution::Adopt(i, key) => {
+                index.adopt(data, i, key);
+                (i, false)
+            }
             Resolution::New(key) => {
                 let (i, _) = index.create(data, key, explicit_name.as_deref(), now);
                 created += 1;
@@ -1485,5 +1550,105 @@ mod tests {
         merge_subscriptions(&mut d2, vec![o2.clone()]);
         merge_subscriptions(&mut d2, vec![o2]);
         assert!(d2.subscriptions[0].post_unsubscribe_mails.is_empty());
+    }
+
+    fn named(domain: &str, name: &str, kind: EvidenceKind, r: &str) -> Finding {
+        Finding {
+            name: Some(name.into()),
+            ..finding(domain, kind, r)
+        }
+    }
+
+    #[test]
+    fn unresolved_account_is_adopted_by_the_real_domain() {
+        let mut d = VaultData::default();
+        merge_findings(
+            &mut d,
+            vec![named(
+                "unresolved:netflix",
+                "Netflix",
+                EvidenceKind::SsoGrant,
+                "s",
+            )],
+        );
+        merge_findings(
+            &mut d,
+            vec![named("netflix.com", "Netflix", EvidenceKind::Welcome, "w")],
+        );
+        assert_eq!(d.accounts.len(), 1);
+        assert_eq!(d.accounts[0].domain, "netflix.com");
+        assert_eq!(d.accounts[0].evidence.len(), 2);
+        // Later unresolved mentions still land on the same account.
+        merge_findings(
+            &mut d,
+            vec![named(
+                "unresolved:netflix",
+                "Netflix",
+                EvidenceKind::SsoGrant,
+                "s2",
+            )],
+        );
+        assert_eq!(d.accounts.len(), 1);
+        assert_eq!(d.accounts[0].evidence.len(), 3);
+        // A different real domain with another name is not adopted.
+        merge_findings(
+            &mut d,
+            vec![named("hulu.com", "Hulu", EvidenceKind::Welcome, "h")],
+        );
+        assert_eq!(d.accounts.len(), 2);
+    }
+
+    #[test]
+    fn reimport_is_stable_with_name_collisions() {
+        let make = || {
+            vec![
+                finding("paypal.de", EvidenceKind::Welcome, "r1"),
+                finding("unresolved:9", EvidenceKind::SsoGrant, "r29"),
+                named("paypal.de", "9", EvidenceKind::Receipt, "r20"),
+            ]
+        };
+        let mut d = VaultData::default();
+        merge_findings(&mut d, make());
+        let n: usize = d.accounts.iter().map(|a| a.evidence.len()).sum();
+        let rep = merge_findings(&mut d, make());
+        assert_eq!(
+            d.accounts.iter().map(|a| a.evidence.len()).sum::<usize>(),
+            n
+        );
+        assert_eq!(rep.updated_accounts, 0);
+    }
+
+    #[test]
+    fn many_findings_for_one_account_are_fast() {
+        let mut d = VaultData::default();
+        let f: Vec<Finding> = (0..20_000)
+            .map(|i| {
+                finding(
+                    "big.example.com",
+                    EvidenceKind::SavedPassword,
+                    &format!("r{i}"),
+                )
+            })
+            .collect();
+        let t = std::time::Instant::now();
+        merge_findings(&mut d, f.clone());
+        merge_findings(&mut d, f);
+        assert_eq!(d.accounts[0].evidence.len(), 20_000);
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn full_rescan_replaces_counts_but_incremental_adds() {
+        let mut d = VaultData::default();
+        merge_subscriptions(&mut d, vec![obs(10, 0, 30, &["a"])]);
+        // Incremental: newer mails only.
+        merge_subscriptions(&mut d, vec![obs(3, 31, 40, &["b"])]);
+        assert_eq!(d.subscriptions[0].message_count, 13);
+        // Full rescan: all 13 mails again (range covers the known one).
+        merge_subscriptions(&mut d, vec![obs(13, 0, 40, &["b"])]);
+        assert_eq!(d.subscriptions[0].message_count, 13);
+        // Full rescan that also found 2 newer mails.
+        merge_subscriptions(&mut d, vec![obs(15, 0, 45, &["c"])]);
+        assert_eq!(d.subscriptions[0].message_count, 15);
     }
 }

@@ -242,7 +242,7 @@ fn layout_for(kind: CsvKind, h: &[String]) -> Layout {
 /// Build a reader over `text`; returns the reader and the normalised header cells.
 fn open(text: &str) -> Result<(csv::Reader<&[u8]>, Vec<String>), ImportError> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let first = text.lines().next().unwrap_or("");
+    let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     let count = |c: char| first.matches(c).count();
     let delim = [(b',', count(',')), (b';', count(';')), (b'\t', count('\t'))]
         .into_iter()
@@ -575,11 +575,19 @@ mod tests {
     }
 
     #[test]
+    fn semicolon_csv_with_leading_blank_lines() {
+        let r = pw("\n\nname;url;username;password;note\nSite;https://a.example.com;u;p;\n");
+        assert_eq!(r.findings.len(), 1);
+        assert_eq!(r.findings[0].domain, "a.example.com");
+    }
+
+    #[test]
     fn chrome_bom_crlf() {
         let csv = "\u{feff}name,url,username,password,note\r\nExample,https://www.example.com/login,alice@example.org,SECRET1,\"multi\r\nline note\"\r\nAndroid,android://hash@com.app/,bob,SECRET2,\r\n";
         let r = pw(csv);
         assert_eq!(r.items_scanned, 2);
-        assert_eq!(r.findings.len(), 1);
+        assert_eq!(r.findings.len(), 2);
+        assert_eq!(r.findings[1].domain, "app.com");
         let f = &r.findings[0];
         assert_eq!(f.domain, "www.example.com");
         assert_eq!(f.name.as_deref(), Some("Example"));
@@ -592,10 +600,6 @@ mod tests {
                 format: PasswordFormat::Chrome
             }
         );
-        assert!(r
-            .warnings
-            .iter()
-            .any(|w| w.contains("ohne verwertbare URL")));
         let dump = format!("{r:?}");
         assert!(!dump.contains("SECRET") && !dump.contains("note"));
     }

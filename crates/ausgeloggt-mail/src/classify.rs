@@ -271,6 +271,20 @@ fn is_spam_precedence(h: &MailHeader) -> bool {
 // ---------------------------------------------------------------------------------------------
 
 const PASSWORD_RESET: &[&str] = &[
+    // extra phrasings (changed / confirmed / login link / welcome variants)
+    "password was changed",
+    "password has been changed",
+    "password was reset",
+    "password has been reset",
+    "your password was updated",
+    "your password has been updated",
+    "passwort wurde geaendert",
+    "passwort wurde zurueckgesetzt",
+    "passwort wurde aktualisiert",
+    "passwort erfolgreich geaendert",
+    "mot de passe a ete modifie",
+    "mot de passe a ete change",
+    "mot de passe a ete reinitialise",
     // en
     "reset your password",
     "reset password",
@@ -344,6 +358,24 @@ const PASSWORD_RESET: &[&str] = &[
 ];
 
 const VERIFICATION: &[&str] = &[
+    // extra phrasings (changed / confirmed / login link / welcome variants)
+    "email address confirmed",
+    "email confirmed",
+    "e-mail confirmed",
+    "email address verified",
+    "email verified",
+    "thanks for verifying",
+    "thank you for verifying",
+    "finish setting up your account",
+    "e-mail-adresse erfolgreich bestaetigt",
+    "adresse erfolgreich bestaetigt",
+    "erfolgreich verifiziert",
+    "anmeldung bestaetigt",
+    "aktivierung deines kontos",
+    "aktivierung ihres kontos",
+    "active ton compte",
+    "activez votre compte",
+    "activer votre compte",
     // en
     "verify your email",
     "verify your e-mail",
@@ -473,6 +505,22 @@ const VERIFICATION: &[&str] = &[
 ];
 
 const LOGIN_ALERT: &[&str] = &[
+    // extra phrasings (changed / confirmed / login link / welcome variants)
+    "login link",
+    "login-link",
+    "magic link",
+    "sign-in link",
+    "sign in link",
+    "einmal-link",
+    "anmelde-link",
+    "anmeldelink",
+    "lien de connexion",
+    "confirm it's you",
+    "confirm it was you",
+    "was this you",
+    "du hast dich angemeldet",
+    "sie haben sich angemeldet",
+    "sicherheitsinfo",
     // en
     "new sign-in",
     "new sign in",
@@ -579,6 +627,20 @@ const LOGIN_ALERT: &[&str] = &[
 ];
 
 const WELCOME: &[&str] = &[
+    // extra phrasings (changed / confirmed / login link / welcome variants)
+    "you're in!",
+    "you are in!",
+    "your account is ready",
+    "here is how to get started",
+    "here's how to get started",
+    "merci d'avoir rejoint",
+    "merci davoir rejoint",
+    "ihr konto ist startklar",
+    "dein konto ist startklar",
+    "dein neues konto",
+    "schoen, dass du da bist",
+    "schoen, dass sie da sind",
+    "schoen dass du da bist",
     // en
     "welcome",
     "thanks for signing up",
@@ -1427,6 +1489,20 @@ pub fn classify_for(header: &MailHeader, own_address: Option<&str>) -> Option<Cl
         }
     };
 
+    // Look-alike domains: security wording alone is no proof of an account.
+    let kind = if matches!(
+        kind,
+        EvidenceKind::PasswordReset
+            | EvidenceKind::Verification
+            | EvidenceKind::LoginAlert
+            | EvidenceKind::Welcome
+    ) && looks_like_brand_impersonation(&host)
+    {
+        EvidenceKind::OtherMail
+    } else {
+        kind
+    };
+
     let relay = to_addrs.iter().find(|a| is_apple_relay(a)).cloned();
     let sender_is_apple = matches!(provider_for_host(&host), Some(SsoProvider::Apple));
     let (sso, identifier) = match relay {
@@ -1450,6 +1526,72 @@ pub fn classify_for(header: &MailHeader, own_address: Option<&str>) -> Option<Cl
     })
 }
 
+/// Brands that phishers imitate (lowercase, folded).
+const IMPERSONATED_BRANDS: &[&str] = &[
+    "paypal",
+    "amazon",
+    "apple",
+    "google",
+    "microsoft",
+    "netflix",
+    "spotify",
+    "ebay",
+    "dhl",
+    "sparkasse",
+    "volksbank",
+    "postbank",
+    "commerzbank",
+    "deutschebank",
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "telekom",
+    "vodafone",
+    "docusign",
+    "steam",
+];
+
+/// TLDs that are overwhelmingly used for throw-away / abusive domains.
+const ABUSE_TLDS: &[&str] = &[
+    "top", "xyz", "click", "icu", "buzz", "live", "cfd", "sbs", "shop", "online", "site", "rest",
+    "cyou", "monster", "work", "support", "vip", "loan", "zip", "mov",
+];
+
+/// Does this sender host look like a brand impersonation (`paypa1-secure.top`,
+/// `amaz0n-konto-pruefung.xyz`, `apple-id-locked.top`)? Deliberately conservative: the
+/// brand must appear in the main label, which must not be the brand itself, and the host
+/// needs a digit-for-letter swap or an abuse-prone TLD. Legit look-alike-free domains such
+/// as `paypal-communication.com` are not flagged.
+pub(crate) fn looks_like_brand_impersonation(host: &str) -> bool {
+    let host = host.trim().trim_end_matches('.').to_lowercase();
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 {
+        return false;
+    }
+    let tld = labels[labels.len() - 1];
+    let main = labels[labels.len() - 2];
+    let swapped: String = main
+        .chars()
+        .map(|c| match c {
+            '0' => 'o',
+            '1' => 'l',
+            '3' => 'e',
+            '4' => 'a',
+            '5' => 's',
+            '$' => 's',
+            c => c,
+        })
+        .collect();
+    let norm: String = swapped.chars().filter(|c| *c != '-').collect();
+    let has_swap = swapped != main;
+    let abuse = ABUSE_TLDS.contains(&tld);
+    if !has_swap && !abuse {
+        return false;
+    }
+    IMPERSONATED_BRANDS
+        .iter()
+        .any(|b| norm.contains(b) && main != *b)
+}
 const SOCIAL_HOSTS: &[&str] = &[
     "facebookmail.com",
     "facebook.com",
@@ -2218,5 +2360,81 @@ mod tests {
         assert!(host_is("mail.linkedin.com", "linkedin.com"));
         assert!(host_is("linkedin.com", "linkedin.com"));
         assert!(!host_is("notlinkedin.com", "linkedin.com"));
+    }
+
+    #[test]
+    fn changed_confirmed_and_login_link_mails_are_account_evidence() {
+        let strong = |s: &str| {
+            matches!(
+                classify(&h("Foo <noreply@foo-service.com>", s)).map(|c| c.kind),
+                Some(
+                    EvidenceKind::Welcome
+                        | EvidenceKind::Verification
+                        | EvidenceKind::PasswordReset
+                        | EvidenceKind::LoginAlert
+                )
+            )
+        };
+        for s in [
+            "Dein Passwort wurde geändert",
+            "Your password was changed",
+            "Votre mot de passe a été modifié",
+            "Email address confirmed",
+            "Thanks for verifying your email",
+            "E-Mail-Adresse erfolgreich bestätigt",
+            "Active ton compte",
+            "Your Foo login link",
+            "Magic link to sign in",
+            "Login-Link für Foo",
+            "You're in!",
+            "Merci d'avoir rejoint Foo",
+            "Dein neues Konto ist startklar",
+            "Schön, dass du da bist",
+        ] {
+            assert!(strong(s), "{s}");
+        }
+        // Still weak: ordinary service mail.
+        assert!(!strong("Dein Paket wurde zugestellt"));
+        assert!(!strong("We've updated our privacy policy"));
+    }
+
+    #[test]
+    fn brand_impersonation_detection() {
+        for bad in [
+            "paypa1-secure.top",
+            "amaz0n-konto-pruefung.xyz",
+            "apple-id-locked.top",
+            "mail.netflix-billing.click",
+            "g00gle.com",
+        ] {
+            assert!(looks_like_brand_impersonation(bad), "{bad}");
+        }
+        for ok in [
+            "paypal.de",
+            "paypal-communication.com",
+            "accounts.google.com",
+            "amazon.de",
+            "email.apple.com",
+            "spotifymail.com",
+            "microsoftonline.com",
+            "foo-service.top",
+            "steampowered.com",
+            "localhost",
+            "",
+        ] {
+            assert!(!looks_like_brand_impersonation(ok), "{ok}");
+        }
+        let c = classify(&h(
+            "Account Security <security@paypa1-secure.top>",
+            "Security alert: unusual sign-in activity detected",
+        ))
+        .unwrap();
+        assert_eq!(c.kind, EvidenceKind::OtherMail);
+        let c = classify(&h(
+            "PayPal <service@paypal.de>",
+            "Security alert: unusual sign-in activity detected",
+        ))
+        .unwrap();
+        assert_eq!(c.kind, EvidenceKind::LoginAlert);
     }
 }

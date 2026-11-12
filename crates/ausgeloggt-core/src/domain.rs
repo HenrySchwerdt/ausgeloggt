@@ -263,6 +263,8 @@ const INFRA_EXACT: &[&str] = &[
     "tutamail.com",
     "tuta.io",
     "privaterelay.appleid.com",
+    // Registrable domain of the Apple relay host above (the PSL reduces it to this).
+    "appleid.com",
 ];
 
 /// Brand names that exist under many TLDs and are all mailbox providers.

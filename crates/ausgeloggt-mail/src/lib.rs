@@ -627,7 +627,9 @@ impl ScanState {
             .filter(|s| !s.is_empty())
         {
             Some(id) => {
-                if !self.seen.insert(id.to_string()) {
+                // Scoped per sender: colliding ids of unrelated senders are different mails.
+                let sender = classify::parse_address(&h.from).1.unwrap_or_default();
+                if !self.seen.insert(format!("{id}|{sender}")) {
                     return None;
                 }
                 id.to_string()
@@ -1974,5 +1976,26 @@ mod tests {
         let err = test_connection(&cfg_for(1)).unwrap_err();
         assert!(matches!(err, MailError::Connect(..)), "{err:?}");
         assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn same_message_id_from_different_senders_are_different_mails() {
+        let mut st = ScanState::new("me@example.org");
+        let mk = |from: &str| MailHeader {
+            from: from.into(),
+            subject: "Willkommen".into(),
+            message_id: Some("<1@localhost>".into()),
+            to: "me@example.org".into(),
+            ..Default::default()
+        };
+        assert!(st
+            .ingest(&mk("A <hello@a-service.de>"), "f", "me@example.org")
+            .is_some());
+        assert!(st
+            .ingest(&mk("B <hello@b-service.de>"), "f", "me@example.org")
+            .is_some());
+        assert!(st
+            .ingest(&mk("B <hello@b-service.de>"), "f", "me@example.org")
+            .is_none());
     }
 }

@@ -1,0 +1,19 @@
+[package]
+name = "ausgeloggt-e2e"
+description = "Dev-only end-to-end, edge-case and fuzz tests with a synthetic mailbox corpus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ausgeloggt-core.workspace = true
+ausgeloggt-mail.workspace = true
+ausgeloggt-import.workspace = true
+ausgeloggt-letters.workspace = true
+ausgeloggt-catalog.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+serde_json.workspace = true
+tempfile = "3.27.0"
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
