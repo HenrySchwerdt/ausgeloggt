@@ -1,0 +1,13 @@
+[package]
+name = "spurlos-mail"
+description = "Postfach-Scan per IMAP und Klassifizierung von Mails"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+spurlos-core.workspace = true
+serde.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+log.workspace = true

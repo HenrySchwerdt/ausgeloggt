@@ -1,0 +1,4 @@
+/target
+*.spurlos
+*.spurlos.bak
+.DS_Store

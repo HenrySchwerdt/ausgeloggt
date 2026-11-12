@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/spurlos-core",
+    "crates/spurlos-import",
+    "crates/spurlos-mail",
+    "crates/spurlos-catalog",
+    "crates/spurlos-ai",
+    "app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+spurlos-core = { path = "crates/spurlos-core" }
+spurlos-import = { path = "crates/spurlos-import" }
+spurlos-mail = { path = "crates/spurlos-mail" }
+spurlos-catalog = { path = "crates/spurlos-catalog" }
+spurlos-ai = { path = "crates/spurlos-ai" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
