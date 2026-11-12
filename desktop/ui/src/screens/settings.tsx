@@ -18,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { confirm } from "@/components/confirm";
 import { passwordStrength } from "./unlock";
 
-const STATES: [string, string][] = [
+export const STATES: [string, string][] = [
   ["", "Aus der Postleitzahl ableiten"], ["DE-BW", "Baden-Württemberg"], ["DE-BY", "Bayern"], ["DE-BE", "Berlin"], ["DE-BB", "Brandenburg"],
   ["DE-HB", "Bremen"], ["DE-HH", "Hamburg"], ["DE-HE", "Hessen"], ["DE-MV", "Mecklenburg-Vorpommern"], ["DE-NI", "Niedersachsen"],
   ["DE-NW", "Nordrhein-Westfalen"], ["DE-RP", "Rheinland-Pfalz"], ["DE-SL", "Saarland"], ["DE-SN", "Sachsen"], ["DE-ST", "Sachsen-Anhalt"],
@@ -215,6 +215,7 @@ export function SettingsPage({ section }: { section?: string }) {
       </Section>
 
       <Section id="about" title="Über ausgeloggt">
+        <Row label="Einführung" hint="Erklärt die App in sechs kurzen Schritten."><Button onClick={() => useStore.getState().openOnboarding()}>Einführung erneut zeigen</Button></Row>
         <Row label="Version"><span className="text-base text-fg-muted">0.1.0</span></Row>
         <Row label="Lizenz" hint="Freie Software unter MIT Lizenz. Alle Daten bleiben lokal."><Button variant="secondary" onClick={() => void openUrl("https://github.com/HenrySchwerdt/ausgeloggt")}>Quellcode und Lizenzen <ExternalLink /></Button></Row>
       </Section>

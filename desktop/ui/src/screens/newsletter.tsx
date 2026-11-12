@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronDown, ExternalLink, FileText, Inbox, Loader2, Mail, Search, Sparkles, X } from "lucide-react";
 import { api, runJob } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
 import { openUrl } from "@/lib/platform";
+import { findManualLinks, knownManualLinks, type ManualLinks } from "@/lib/manual-unsub";
 import {
   MAIL_CATEGORY_LABEL, SUBSCRIPTION_STATUS_LABEL, type MailCategory, type Subscription, type SubscriptionStatus,
   type UnsubscribeDonePayload,
@@ -133,11 +134,13 @@ export function NewsletterPage() {
   const catOptions = [{ value: "all", label: "Alle" }, ...CATS.map((c) => ({ value: c, label: MAIL_CATEGORY_LABEL[c] }))];
 
   const actionFor = (s: Subscription) =>
-    autoMethod(s) && canAct(s)
+    autoMethod(s) && canAct(s) && s.status !== "Failed"
       ? <Button variant="secondary" disabled={busy !== null} onClick={(e) => { e.stopPropagation(); void unsubscribe([s.id]); }}>Abmelden</Button>
       : linkOf(s) && canAct(s)
         ? <Button variant="secondary" onClick={(e) => { e.stopPropagation(); void openLink(s); }}>Seite öffnen <ExternalLink /></Button>
-        : null;
+        : canAct(s)
+          ? <Button variant="secondary" onClick={(e) => { e.stopPropagation(); setOpenId(s.id); }}>Selbst abmelden</Button>
+          : null;
 
   return (
     <div className="relative flex h-full min-w-0">
@@ -231,7 +234,7 @@ export function NewsletterPage() {
 
       {open && (
         <aside className="anim-slide-right h-full w-[420px] shrink-0 border-l border-border bg-bg max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-0 max-[1100px]:z-30 max-[1100px]:max-w-full max-[1100px]:shadow-popover">
-          <SubDetail s={open} onClose={() => setOpenId(null)} busy={busy !== null} onUnsub={() => void unsubscribe([open.id])} onLink={() => void openLink(open)} onCat={(c) => pickCat([open.id], c)} />
+          <SubDetail s={open} onClose={() => setOpenId(null)} busy={busy !== null} onUnsub={() => void unsubscribe([open.id])} onCat={(c) => pickCat([open.id], c)} />
         </aside>
       )}
     </div>
@@ -258,8 +261,8 @@ function ResultStrip({ r, subs, onClose }: { r: UnsubscribeDonePayload; subs: Su
   );
 }
 
-function SubDetail({ s, onClose, busy, onUnsub, onLink, onCat }: {
-  s: Subscription; onClose(): void; busy: boolean; onUnsub(): void; onLink(): void; onCat(c: MailCategory): void;
+function SubDetail({ s, onClose, busy, onUnsub, onCat }: {
+  s: Subscription; onClose(): void; busy: boolean; onUnsub(): void; onCat(c: MailCategory): void;
 }) {
   const setStatus = useStore((x) => x.setSubscriptionStatus);
   const proofs = s.post_unsubscribe_mails;
@@ -278,12 +281,12 @@ function SubDetail({ s, onClose, busy, onUnsub, onLink, onCat }: {
       <div className="flex flex-wrap items-center gap-2 px-5 pb-4">
         <span className="flex items-center gap-2 text-base text-fg-muted"><Dot className={SUB_STATUS_COLOR[s.status]} />{SUBSCRIPTION_STATUS_LABEL[s.status]}</span>
         <span className="flex-1" />
-        {canAct(s) && autoMethod(s) && <Button variant="primary" disabled={busy} onClick={onUnsub}>Abmelden</Button>}
-        {canAct(s) && !autoMethod(s) && linkOf(s) && <Button variant="primary" onClick={onLink}>Seite öffnen <ExternalLink /></Button>}
+        {canAct(s) && autoMethod(s) && s.status !== "Failed" && <Button variant="primary" disabled={busy} onClick={onUnsub}>Abmelden</Button>}
         {s.status !== "Keep" && <Button onClick={() => st("Keep")}>Behalten</Button>}
         {s.status === "Keep" && <Button onClick={() => st("Active")}>Nicht mehr behalten</Button>}
         {s.status !== "Unsubscribed" && <Button variant="ghost" onClick={() => st("Unsubscribed")}>Bereits abgemeldet</Button>}
       </div>
+      {canAct(s) && (s.status === "Failed" || !autoMethod(s)) && <ManualFallback s={s} failed={s.status === "Failed"} />}
       <dl className="grid grid-cols-3 gap-4 border-t border-border px-5 py-4">
         <div><dt className="text-sm text-fg-faint">Mails</dt><dd className="tnum text-base">{nf(s.message_count)}</dd></div>
         <div><dt className="text-sm text-fg-faint">Pro Monat</dt><dd className="tnum text-base">{s.frequency_per_month < 1 ? "selten" : Math.round(s.frequency_per_month)}</dd></div>
@@ -334,5 +337,71 @@ function SubDetail({ s, onClose, busy, onUnsub, onLink, onCat }: {
       )}
       <div className="h-6 shrink-0" />
     </div>
+  );
+}
+
+/** Shown when the automatic unsubscribe failed or there is none: the user does it by hand. */
+function ManualFallback({ s, failed }: { s: Subscription; failed: boolean }) {
+  const setStatus = useStore((x) => x.setSubscriptionStatus);
+  const [found, setFound] = useState<ManualLinks>(() => knownManualLinks(s));
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => { setFound(knownManualLinks(s)); setSearched(false); setOpened(false); }, [s.id]);
+
+  const search = async () => {
+    setSearching(true);
+    try { setFound(await findManualLinks(s)); setSearched(true); } catch (e) { toast.error(errorMessage(e)); } finally { setSearching(false); }
+  };
+  const open = async (url: string) => {
+    const ok = await confirm({
+      title: s.name + ": Abmeldeseite öffnen?",
+      text: "Sie öffnet im Browser. Bestätige dort nur die Abmeldung und gib keine weiteren Daten ein. Wenn die Seite mehr verlangt, brich ab.",
+      confirm: "Seite öffnen",
+    });
+    if (!ok) return;
+    await openUrl(url);
+    setOpened(true);
+  };
+  const host = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+
+  return (
+    <section className="border-t border-border px-5 py-4">
+      <h3 className="mb-2 text-sm font-medium text-fg-faint">Selbst abmelden</h3>
+      <p className="text-base">{failed ? "Automatisch ging nicht. So meldest du dich selbst ab:" : "Hier gibt es keine automatische Abmeldung. So meldest du dich selbst ab:"}</p>
+      <ul className="mt-3 flex flex-col">
+        {found.links.map((l) => (
+          <li key={l.url} className="flex min-h-11 items-center gap-3 border-b border-border py-1.5 last:border-b-0">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base">{l.label}</div>
+              <div className="truncate text-sm text-fg-faint" title={l.url}>{host(l.url)}{l.source === "mail" ? ", aus der Mail" : ""}</div>
+            </div>
+            <Button variant="secondary" onClick={() => void open(l.url)}>Seite öffnen <ExternalLink /></Button>
+          </li>
+        ))}
+        {found.mailto && (
+          <li className="flex min-h-11 items-center gap-3 py-1.5">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base">Per Mail abmelden</div>
+              <div className="truncate text-sm text-fg-faint">{found.mailto}</div>
+            </div>
+            <Button variant="secondary" onClick={() => { void openUrl("mailto:" + found.mailto + "?subject=" + encodeURIComponent("Abmeldung")); setOpened(true); }}>Mail schreiben</Button>
+          </li>
+        )}
+        {found.links.length === 0 && !found.mailto && <li className="text-base text-fg-muted">Der Absender nennt keine Abmeldung.{searched ? " Auch in der letzten Mail haben wir nichts gefunden." : ""}</li>}
+      </ul>
+      <Button className="mt-3" variant="ghost" disabled={searching} onClick={() => void search()}>
+        {searching && <Loader2 className="animate-spin" />} Link aus der letzten Mail suchen
+      </Button>
+      {opened && (
+        <div className="anim-fade mt-4 flex flex-col gap-2.5 border-t border-border pt-4">
+          <p className="text-base font-medium">Hast du dich abgemeldet?</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={() => void setStatus([s.id], "Unsubscribed")}><Check /> Erledigt, ich habe mich abgemeldet</Button>
+            <Button variant="ghost" onClick={() => { setOpened(false); void setStatus([s.id], "Failed"); }}>Hat nicht geklappt</Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

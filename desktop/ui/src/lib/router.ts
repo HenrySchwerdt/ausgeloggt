@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type Route =
   | { page: "dashboard" }
+  | { page: "review" }
   | { page: "accounts"; id?: string }
   | { page: "cleanup"; tidy?: boolean }
   | { page: "newsletter" }
@@ -16,6 +17,7 @@ export type Page = Route["page"];
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("?")[0]!.split("/").filter(Boolean);
   switch (parts[0]) {
+    case "review": return { page: "review" };
     case "accounts": return { page: "accounts", id: parts[1] };
     case "cleanup": return { page: "cleanup", tidy: parts[1] === "tidy" };
     case "newsletter": return { page: "newsletter" };

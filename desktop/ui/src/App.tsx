@@ -15,6 +15,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { UnlockScreen } from "@/screens/unlock";
 import { Dashboard } from "@/screens/dashboard";
 import { AccountsPage } from "@/screens/accounts";
+import { ReviewPage } from "@/screens/review";
+import { Onboarding } from "@/screens/onboarding";
 import { CleanupPage } from "@/screens/cleanup";
 import { NewsletterPage } from "@/screens/newsletter";
 import { BillingPage } from "@/screens/billing";
@@ -27,6 +29,7 @@ function Page() {
   const route = useRoute();
   switch (route.page) {
     case "dashboard": return <Dashboard />;
+    case "review": return <ReviewPage />;
     case "accounts": return <AccountsPage />;
     case "cleanup": return <CleanupPage tidy={!!route.tidy} />;
     case "newsletter": return <NewsletterPage />;
@@ -55,6 +58,7 @@ export default function App() {
   const phase = useStore((s) => s.phase);
   const boot = useStore((s) => s.boot);
   const setDropHover = useStore((s) => s.setDropHover);
+  const onboarding = useStore((s) => s.onboarding);
 
   useEffect(() => { void boot(); }, [boot]);
 
@@ -62,7 +66,7 @@ export default function App() {
     if (phase !== "ready") return;
     let un: (() => void) | undefined;
     let dead = false;
-    void onFileDrop((paths) => { useDrop.getState().push(paths); navigate({ page: "sources" }); }, setDropHover)
+    void onFileDrop((paths) => { useDrop.getState().push(paths); if (!useStore.getState().onboarding) navigate({ page: "sources" }); }, setDropHover)
       .then((u) => { if (dead) u(); else un = u; });
     return () => { dead = true; un?.(); };
   }, [phase, setDropHover]);
@@ -83,7 +87,8 @@ export default function App() {
         <div className="flex h-full items-center justify-center bg-bg text-fg-faint"><Loader2 className="size-4 animate-spin" /></div>
       )}
       {phase === "locked" && <UnlockScreen />}
-      {phase === "ready" && (
+      {phase === "ready" && onboarding && <Onboarding />}
+      {phase === "ready" && !onboarding && (
         <div className="flex h-full bg-bg">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">

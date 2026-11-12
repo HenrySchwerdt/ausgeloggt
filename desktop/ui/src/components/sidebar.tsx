@@ -2,8 +2,8 @@ import { Lock, Moon, Sun } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { href, useRoute } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { isHidden, isLiveRequest } from "@/lib/derive";
-import { NAV } from "./nav";
+import { isHidden, isLiveRequest, isWeak, toReview } from "@/lib/derive";
+import { NAV_GROUPS } from "./nav";
 import { LogoMark, Dot } from "./common";
 import { platform } from "./titlebar";
 import { Button } from "./ui/button";
@@ -19,7 +19,9 @@ export function Sidebar() {
 
   const counts: Partial<Record<string, number>> = snap
     ? {
-        accounts: snap.accounts.filter((a) => !isHidden(a)).length,
+        review: toReview(snap.accounts).length,
+        cleanup: snap.accounts.filter((a) => a.status === "Confirmed" || a.status === "DeletionPending").length,
+        accounts: snap.accounts.filter((a) => !isHidden(a) && !isWeak(a)).length,
         newsletter: snap.subscriptions.filter((s) => s.status === "Active" || s.status === "StillReceiving").length,
         requests: snap.requests.filter(isLiveRequest).length,
       }
@@ -33,26 +35,31 @@ export function Sidebar() {
         <span className="pointer-events-none text-lg font-semibold tracking-[-0.01em]">ausgeloggt</span>
       </div>
 
-      <nav className="mt-3 flex flex-col gap-0.5 px-2">
-        {NAV.map(({ page, label, icon: Icon }) => {
-          const active = route.page === page;
-          const count = counts[page];
-          return (
-            <a
-              key={page}
-              href={href({ page } as never)}
-              draggable={false}
-              className={cn(
-                "flex h-[30px] items-center gap-2.5 rounded-md px-2.5 text-base transition-colors",
-                active ? "bg-muted text-fg" : "text-fg-muted hover:bg-muted hover:text-fg",
-              )}
-            >
-              <Icon className={cn("size-4", active ? "text-fg" : "text-fg-muted")} strokeWidth={1.75} />
-              <span className="flex-1">{label}</span>
-              {page === "requests" && overdue > 0 ? <span className="flex items-center gap-1.5 text-sm text-fg-muted"><Dot className="bg-s-red" />{overdue}</span> : count ? <span className="tnum text-sm text-fg-faint">{count}</span> : null}
-            </a>
-          );
-        })}
+      <nav className="mt-3 flex flex-col gap-4 overflow-y-auto px-2">
+        {NAV_GROUPS.map((g, gi) => (
+          <div key={gi} className="flex flex-col gap-0.5">
+            {g.label && <div className="px-2.5 pb-1 text-sm text-fg-faint">{g.label}</div>}
+            {g.items.map(({ page, label, icon: Icon }) => {
+              const active = route.page === page;
+              const count = counts[page];
+              return (
+                <a
+                  key={page}
+                  href={href({ page } as never)}
+                  draggable={false}
+                  className={cn(
+                    "flex h-[30px] items-center gap-2.5 rounded-md px-2.5 text-base transition-colors",
+                    active ? "bg-muted text-fg" : "text-fg-muted hover:bg-muted hover:text-fg",
+                  )}
+                >
+                  <Icon className={cn("size-4", active ? "text-fg" : "text-fg-muted")} strokeWidth={1.75} />
+                  <span className="flex-1">{label}</span>
+                  {page === "requests" && overdue > 0 ? <span className="flex items-center gap-1.5 text-sm text-fg-muted"><Dot className="bg-s-red" />{overdue}</span> : count ? <span className="tnum text-sm text-fg-faint">{count}</span> : null}
+                </a>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="mt-auto flex flex-col gap-1.5 border-t border-border p-2">

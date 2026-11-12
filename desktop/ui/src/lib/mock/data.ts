@@ -103,6 +103,11 @@ const R: Row[] = [
   { n: "Skyscanner", d: "skyscanner.de", s: "Discovered", src: [mail(G)], id: apple("d7s0p3tk8w"), conf: 0.55, days: 650, sso: ["Apple"], k: ["Newsletter", "Welcome"] },
   { n: "Tinder", d: "tinder.com", s: "Discovered", src: ["FacebookExport"], id: "lena.hartmann", conf: 0.73, days: 2700, sso: ["Facebook"], k: ["DataExport"] },
   { n: "Ryanair", d: "ryanair.com", s: "Discovered", src: [mail(G)], id: G, conf: 0.84, days: 1100, k: ["Receipt", "Verification"] },
+  { n: "Morgenpost", d: "morgenpost.de", s: "Discovered", src: [mail(G)], id: G, conf: 0.55, days: 900, k: ["Newsletter"] },
+  { n: "Smartphoto", d: "smartphoto.de", s: "Discovered", src: [mail(W)], id: W, conf: 0.42, days: 1500, k: ["OtherMail"] },
+  { n: "Rewe", d: "rewe.de", s: "Discovered", src: [mail(G)], id: G, conf: 0.62, days: 400, k: ["Newsletter", "OtherMail"] },
+  { n: "Gutscheinbuch", d: "gutscheinbuch.de", s: "Discovered", src: [mail(W)], id: W, conf: 0.3, days: 2100, k: ["Newsletter"] },
+  { n: "Fitbit", d: "fitbit.com", s: "Discovered", src: [mail(G)], id: G, conf: 0.45, days: 1900, k: ["Verification"] },
   { n: "Wix", d: "wix.com", s: "Deleted", src: [mail(W)], id: W, conf: 0.9, days: 3000, k: ["Welcome", "Receipt"] },
 ];
 

@@ -41,13 +41,13 @@ export function methodTag(m: DeletionMethod): string {
 // ---- German labels (no dashes, no hyphenated compounds) ----
 
 export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
-  Discovered: "Neu entdeckt",
-  Confirmed: "Bestätigt",
+  Discovered: "Zu prüfen",
+  Confirmed: "Account",
   Keep: "Behalten",
   DeletionPending: "Löschung läuft",
   Deleted: "Gelöscht",
   NotAnAccount: "Kein Account",
-  Ignored: "Ignoriert",
+  Ignored: "Ausgeblendet",
 };
 
 export const EVIDENCE_LABEL: Record<EvidenceKind, string> = {

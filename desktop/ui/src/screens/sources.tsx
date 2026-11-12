@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Camera, Check, ExternalLink, FileUp, Loader2, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
+import { Camera, Check, ExternalLink, FileUp, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
 import { api, runJob } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
@@ -9,7 +9,7 @@ import { useDrop } from "@/lib/drop";
 import { useAsync } from "@/lib/hooks";
 import {
   connectionsUrl, sourceLabel, ssoKey, ssoLabel, type ImportDetection, type ImportDonePayload, type JobProgress,
-  type Mailbox, type ProviderPreset, type ScanDonePayload, type ScreenshotEntry, type ScreenshotReadPayload, type SsoProvider,
+  type Mailbox, type ScanDonePayload, type ScreenshotEntry, type ScreenshotReadPayload, type SsoProvider,
 } from "@/lib/types";
 import { de, errorMessage, formatDate, nf, plural, relativeDays } from "@/lib/utils";
 import { Dot, EmptyState, PageHeader, SectionLabel, ServiceLogo } from "@/components/common";
@@ -18,9 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { confirm } from "@/components/confirm";
+import { MailboxForm } from "@/components/mailbox-form";
+import { ImportPanel } from "@/components/import-panel";
 
 const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
@@ -28,6 +29,7 @@ export function SourcesPage() {
   const snap = useStore((s) => s.snap)!;
   const jobs = useStore((s) => s.jobs);
   const [wizard, setWizard] = useState(false);
+  const [panel, setPanel] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<JobProgress | null>(null);
   const [scanRes, setScanRes] = useState<ScanDonePayload | null>(null);
@@ -47,11 +49,11 @@ export function SourcesPage() {
   }
 
   useEffect(() => {
-    if (!pending.length) return;
+    if (!pending.length || panel) return;
     const paths = pending;
     useDrop.getState().clear();
     if (paths.every((p) => IMAGE_EXT.test(p))) setShots(paths); else setImportPaths(paths);
-  }, [pending]);
+  }, [pending, panel]);
 
   const choose = async (kind: "passwords" | "images") => {
     try {
@@ -102,11 +104,16 @@ export function SourcesPage() {
 
       <section>
         <SectionLabel>Importe</SectionLabel>
-        <div className="mt-1 grid grid-cols-2 gap-3 max-md:grid-cols-1">
+        <div className="mt-1 grid grid-cols-3 gap-3 max-lg:grid-cols-1">
+          <button onClick={() => setPanel(true)} className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-muted">
+            <KeyRound className="size-5 text-fg-muted" strokeWidth={1.5} />
+            <span className="text-base font-medium">Passwortexport</span>
+            <span className="text-sm text-fg-muted">Chrome, Firefox, Safari, Bitwarden, 1Password und mehr. Mit Anleitung für jeden Manager.</span>
+          </button>
           <button onClick={() => void choose("passwords")} className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-muted">
             <FileUp className="size-5 text-fg-muted" strokeWidth={1.5} />
-            <span className="text-base font-medium">Datei importieren</span>
-            <span className="text-sm text-fg-muted">Passwortexport, Google Takeout, Facebook Export oder Liste. Auswählen oder ins Fenster ziehen.</span>
+            <span className="text-base font-medium">Takeout, Facebook oder Liste</span>
+            <span className="text-sm text-fg-muted">Datei auswählen oder ins Fenster ziehen. Wir erkennen die Art selbst.</span>
           </button>
           <button onClick={() => aiVision ? void choose("images") : navigate({ page: "settings", section: "ai" })} className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-muted">
             <Camera className="size-5 text-fg-muted" strokeWidth={1.5} />
@@ -155,6 +162,12 @@ export function SourcesPage() {
       </section>
 
       <MailboxWizard open={wizard} onClose={() => setWizard(false)} onAdded={(id) => void scan([id])} />
+      <Dialog open={panel} onOpenChange={setPanel}>
+        <DialogContent className="max-w-[560px]">
+          <DialogHeader><DialogTitle>Passwortexport importieren</DialogTitle><DialogDescription>Die Datei wird nur auf diesem Gerät gelesen. Passwörter werden kurz geprüft und nie gespeichert.</DialogDescription></DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5"><ImportPanel /></div>
+        </DialogContent>
+      </Dialog>
       <ImportDialog paths={importPaths} onClose={() => setImportPaths(null)} />
       <ShotsDialog paths={shots} onClose={() => setShots(null)} />
     </PageShell>
@@ -191,102 +204,17 @@ function MailboxRow({ m, busy, onScan }: { m: Mailbox; busy: boolean; onScan(ful
 }
 
 function MailboxWizard({ open, onClose, onAdded }: { open: boolean; onClose(): void; onAdded(id: string): void }) {
-  const presets = useAsync(() => api.mail.presets(), []);
-  const [address, setAddress] = useState("");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("993");
-  const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [folders, setFolders] = useState<string[]>([]);
-  const [avail, setAvail] = useState<string[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "test" | "save">(null);
-  const [userEdited, setUserEdited] = useState(false);
-  const [preset, setPreset] = useState<ProviderPreset | null>(null);
-
-  useEffect(() => {
-    if (!open) { setAddress(""); setHost(""); setPort("993"); setUser(""); setPassword(""); setFolders([]); setAvail(null); setError(null); setPreset(null); setUserEdited(false); }
-  }, [open]);
-
-  const onAddress = (v: string) => {
-    setAddress(v); setAvail(null); setError(null);
-    if (!userEdited) setUser(v);
-    const dom = v.split("@")[1]?.toLowerCase();
-    const p = dom ? presets.data?.find((x) => x.domains.includes(dom)) ?? null : null;
-    setPreset(p);
-    if (p) { setHost(p.imap_host); setPort(String(p.imap_port)); if (!folders.length) setFolders(p.default_folders); }
-  };
-
-  const draft = () => ({ address: address.trim(), imapHost: host.trim(), imapPort: Number(port) || 993, username: user.trim() || address.trim(), password, folders });
-  const valid = /.+@.+\..+/.test(address) && host.trim() && password;
-
-  async function test() {
-    setBusy("test"); setError(null);
-    try {
-      const f = await api.mail.testDraft(draft());
-      setAvail(f);
-      setFolders((cur) => { const keep = cur.filter((x) => f.includes(x)); return keep.length ? keep : f.includes("INBOX") ? ["INBOX"] : f.slice(0, 1); });
-    } catch (e) { setError(errorMessage(e)); setAvail(null); } finally { setBusy(null); }
-  }
-  async function save() {
-    setBusy("save");
-    try {
-      const id = await api.mail.add({ ...draft(), folders: folders.length ? folders : ["INBOX"] });
-      toast("Postfach hinzugefügt");
-      onClose();
-      onAdded(id);
-    } catch (e) { setError(errorMessage(e)); } finally { setBusy(null); }
-  }
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[520px]">
         <DialogHeader><DialogTitle>Postfach hinzufügen</DialogTitle><DialogDescription>Der Zugriff ist nur lesend. Das Passwort wird verschlüsselt im Tresor gespeichert.</DialogDescription></DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 pb-4">
-          <label className="flex flex-col gap-1 text-sm text-fg-muted">Mailadresse
-            <Input autoFocus value={address} onChange={(e) => onAddress(e.target.value)} placeholder="name@beispiel.de" inputMode="email" />
-          </label>
-          {preset && (
-            <div className="rounded-md bg-muted px-3 py-2 text-base text-fg-muted">
-              {de(preset.hint_de)}
-              {preset.app_password_url && <> <button className="text-fg underline underline-offset-2" onClick={() => void openUrl(preset.app_password_url!)}>App Passwort erzeugen</button></>}
-            </div>
-          )}
-          <div className="grid grid-cols-[1fr_88px] gap-2">
-            <label className="flex flex-col gap-1 text-sm text-fg-muted">IMAP Server<Input value={host} onChange={(e) => { setHost(e.target.value); setAvail(null); }} placeholder="imap.beispiel.de" /></label>
-            <label className="flex flex-col gap-1 text-sm text-fg-muted">Port<Input value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} inputMode="numeric" /></label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm text-fg-muted">Benutzername<Input value={user} onChange={(e) => { setUser(e.target.value); setUserEdited(true); }} placeholder="meist die Mailadresse" /></label>
-          <label className="flex flex-col gap-1 text-sm text-fg-muted">Passwort oder App Passwort<Input type="password" value={password} placeholder="Passwort" autoComplete="off" onChange={(e) => { setPassword(e.target.value); setAvail(null); }} /></label>
-          {error && <p className="flex items-start gap-2 text-base text-fg"><Dot className="mt-[7px] bg-s-red" />{error}</p>}
-          {avail && (
-            <div className="flex flex-col gap-1.5">
-              <p className="flex items-center gap-2 text-base"><Dot className="bg-s-green" />Verbindung steht. Welche Ordner sollen geprüft werden?</p>
-              <div className="flex max-h-32 flex-col overflow-y-auto">
-                {avail.map((f) => (
-                  <label key={f} className="flex h-7 items-center gap-2 text-base">
-                    <Checkbox checked={folders.includes(f)} onCheckedChange={() => setFolders((cur) => cur.includes(f) ? cur.filter((x) => x !== f) : [...cur, f])} />{f}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          {error && valid && <button className="mr-auto text-base text-fg-muted underline underline-offset-2 hover:text-fg" onClick={() => void save()} disabled={busy !== null}>Ohne Test speichern</button>}
-          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          {avail ? (
-            <Button variant="primary" disabled={busy !== null || folders.length === 0} onClick={() => void save()}>{busy === "save" && <Loader2 className="animate-spin" />} Speichern und prüfen</Button>
-          ) : (
-            <Button variant="primary" disabled={!valid || busy !== null} onClick={() => void test()}>{busy === "test" && <Loader2 className="animate-spin" />} Verbindung testen</Button>
-          )}
-        </DialogFooter>
+        <MailboxForm onCancel={onClose} onSaved={(id) => { onClose(); onAdded(id); }} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function ImportDialog({ paths, onClose }: { paths: string[] | null; onClose(): void }) {
+export function ImportDialog({ paths, onClose }: { paths: string[] | null; onClose(): void }) {
   const settings = useStore((s) => s.snap!.settings);
   const detect = useAsync(async () => {
     if (!paths) return [];

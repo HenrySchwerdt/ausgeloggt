@@ -6,7 +6,19 @@ import { errorMessage, throttle } from "./utils";
 import type {
   AccountStatus, InsightsDto, JobKind, JobProgress, ReferenceData, Snapshot, SubscriptionStatus,
 } from "./types";
-import { ACCOUNT_STATUS_LABEL } from "./types";
+import { ACCOUNT_STATUS_LABEL, SUBSCRIPTION_STATUS_LABEL } from "./types";
+import { discoveryStats } from "./derive";
+
+const UNDO_MS = 6000;
+
+// Onboarding flag. The backend settings have no field for it yet, so it lives in localStorage per vault file.
+const onboardingKey = (path: string) => `ausgeloggt-onboarding:${path || "default"}`;
+function onboardingDone(path: string): boolean {
+  try { return localStorage.getItem(onboardingKey(path)) === "1"; } catch { return false; }
+}
+function markOnboardingDone(path: string) {
+  try { localStorage.setItem(onboardingKey(path), "1"); } catch { /* storage unavailable */ }
+}
 
 export type Theme = "dark" | "light";
 type Phase = "boot" | "locked" | "ready";
@@ -37,6 +49,9 @@ interface State {
   accountsFilter: AccountStatus | "all" | "hidden";
   jobs: Record<string, RunningJobInfo>;
   dropHover: boolean;
+  onboarding: boolean;
+  openOnboarding(): void;
+  closeOnboarding(): void;
   setAccountsFilter(f: AccountStatus | "all" | "hidden"): void;
   boot(): Promise<void>;
   unlock(pw: string): Promise<void>;
@@ -87,6 +102,19 @@ export const useStore = create<State>((set, get) => {
     });
   }
 
+  /** After a scan or import: what was found, and the way to the next step. */
+  async function announceFindings(summary: string) {
+    await loadAll();
+    if (get().onboarding) return; // the wizard shows the result itself
+    const stats = discoveryStats(get().snap?.accounts ?? []);
+    if (stats.total === 0) { toast(summary); return; }
+    toast(summary, {
+      description: `${stats.total} ${stats.total === 1 ? "Fund" : "Funde"}: ${stats.high} sicher, ${stats.mid} wahrscheinlich, ${stats.low} unsicher.`,
+      duration: 20000,
+      action: { label: "Jetzt prüfen", onClick: () => navigate({ page: "review" }) },
+    });
+  }
+
   function bindEvents() {
     if (eventsBound) return;
     eventsBound = true;
@@ -106,7 +134,8 @@ export const useStore = create<State>((set, get) => {
     });
     void api.events.onJobDone((d) => {
       set((s) => { const j = { ...s.jobs }; delete j[d.jobId]; return { jobs: j }; });
-      if (d.ok) toast(d.summary);
+      if (d.ok && (d.kind === "scan" || d.kind === "import")) void announceFindings(d.summary);
+      else if (d.ok) toast(d.summary);
       else if (d.summary === "Abgebrochen") toast("Abgebrochen");
       else toast.error(d.error?.message ?? d.summary);
     });
@@ -115,9 +144,13 @@ export const useStore = create<State>((set, get) => {
     window.addEventListener("pointermove", ping, { passive: true });
   }
 
-  async function enter() {
+  async function enter(justCreated = false) {
     await loadAll();
-    set({ phase: get().snap ? "ready" : get().phase });
+    const snap = get().snap;
+    const fresh = !!snap && snap.accounts.length === 0 && snap.mailboxes.length === 0;
+    const onboarding = justCreated || params.has("onboarding")
+      || (fresh && !params.has("noonboarding") && !onboardingDone(get().vaultPath));
+    set({ phase: snap ? "ready" : get().phase, onboarding: !!snap && onboarding });
     bindEvents();
     try {
       const running = await api.jobs.running();
@@ -139,6 +172,9 @@ export const useStore = create<State>((set, get) => {
     accountsFilter: "all",
     jobs: {},
     dropHover: false,
+    onboarding: false,
+    openOnboarding() { set({ onboarding: true }); },
+    closeOnboarding() { markOnboardingDone(get().vaultPath); set({ onboarding: false }); },
     setAccountsFilter(f) { set({ accountsFilter: f }); },
 
     async boot() {
@@ -169,11 +205,11 @@ export const useStore = create<State>((set, get) => {
     async create(pw) {
       await api.vault.create(pw);
       set({ vaultExists: true });
-      await enter();
+      await enter(true);
     },
     async lock() {
       try { await api.vault.lock(); } catch { /* already locked */ }
-      set({ phase: "locked", snap: null, insights: null, jobs: {} });
+      set({ phase: "locked", snap: null, insights: null, jobs: {}, onboarding: false });
       navigate({ page: "dashboard" });
     },
     async refresh() { await loadAll(); },
@@ -194,16 +230,52 @@ export const useStore = create<State>((set, get) => {
     setDropHover(b) { set({ dropHover: b }); },
 
     async setAccountStatus(ids, status, quiet) {
+      const accounts = get().snap?.accounts ?? [];
+      const prev = new Map<string, AccountStatus>();
+      for (const a of accounts) if (ids.includes(a.id)) prev.set(a.id, a.status);
       try {
         await api.accounts.setStatus(ids, status);
       } catch (e) { toast.error(errorMessage(e)); return; }
-      if (!quiet) toast(ids.length === 1 ? ACCOUNT_STATUS_LABEL[status] : `${ids.length} Accounts: ${ACCOUNT_STATUS_LABEL[status]}`);
+      if (quiet) return;
+      const one = ids.length === 1 ? accounts.find((a) => a.id === ids[0]) : undefined;
+      toast(one ? `${one.name}: ${ACCOUNT_STATUS_LABEL[status]}` : `${ids.length} Accounts: ${ACCOUNT_STATUS_LABEL[status]}`, {
+        duration: UNDO_MS,
+        action: {
+          label: "Rückgängig",
+          onClick: async () => {
+            const byStatus = new Map<AccountStatus, string[]>();
+            for (const [id, st] of prev) byStatus.set(st, [...(byStatus.get(st) ?? []), id]);
+            try {
+              for (const [st, list] of byStatus) await api.accounts.setStatus(list, st);
+              toast("Zurückgesetzt", { duration: 2000 });
+            } catch (e) { toast.error(errorMessage(e)); }
+          },
+        },
+      });
     },
     async setNotes(id, notes) {
       try { await api.accounts.setNotes(id, notes); } catch (e) { toast.error(errorMessage(e)); }
     },
     async setSubscriptionStatus(ids, status) {
-      try { await api.newsletters.setStatus(ids, status); } catch (e) { toast.error(errorMessage(e)); }
+      const subs = get().snap?.subscriptions ?? [];
+      const prev = new Map<string, SubscriptionStatus>();
+      for (const s of subs) if (ids.includes(s.id)) prev.set(s.id, s.status);
+      try { await api.newsletters.setStatus(ids, status); } catch (e) { toast.error(errorMessage(e)); return; }
+      const one = ids.length === 1 ? subs.find((s) => s.id === ids[0]) : undefined;
+      toast(one ? `${one.name}: ${SUBSCRIPTION_STATUS_LABEL[status]}` : `${ids.length} Newsletter: ${SUBSCRIPTION_STATUS_LABEL[status]}`, {
+        duration: UNDO_MS,
+        action: {
+          label: "Rückgängig",
+          onClick: async () => {
+            const byStatus = new Map<SubscriptionStatus, string[]>();
+            for (const [id, st] of prev) byStatus.set(st, [...(byStatus.get(st) ?? []), id]);
+            try {
+              for (const [st, list] of byStatus) await api.newsletters.setStatus(list, st);
+              toast("Zurückgesetzt", { duration: 2000 });
+            } catch (e) { toast.error(errorMessage(e)); }
+          },
+        },
+      });
     },
   };
 });

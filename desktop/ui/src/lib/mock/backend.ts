@@ -58,16 +58,17 @@ export function createMockBackend(): Backend {
   const hasAnthropic = { v: false };
 
   const settings: SettingsDto = {
-    auto_lock_minutes: 10, min_confidence: 0.5, full_name: "Lena Hartmann", letter_language: "de",
+    auto_lock_minutes: 10, min_confidence: 0.5, full_name: empty ? "" : "Lena Hartmann", letter_language: "de",
     allow_catalog_updates: true, dark_mode: true, fetch_logos: false,
     ai: { provider: q.get("ai") === "ollama" ? "Ollama" : "Off", ollama_url: "http://127.0.0.1:11434", ollama_model: q.get("ai") === "ollama" ? "llama3.1:8b" : "", anthropic_model: "claude-haiku-5-5", has_anthropic_key: false },
-    identity: q.has("noidentity")
+    identity: q.has("noidentity") || empty
       ? { street: "", postal_code: "", city: "", country: "Deutschland", state: "", birth_date: "", previous_addresses: [], phone: "", email: "" }
       : { street: "Lindenallee 12", postal_code: "80331", city: "München", country: "Deutschland", state: "DE-BY", birth_date: "1989-04-17", previous_addresses: ["Gartenstraße 3, 10115 Berlin"], phone: "", email: "lena.hartmann@gmail.com" },
     check_pwned_passwords: true, read_receipt_bodies: false, auto_rescan_days: 7, notifications: true, has_hibp_key: false,
   };
 
-  const baseAccounts = enrichAccounts(buildAccounts());
+  const discover = q.has("discover");
+  const baseAccounts = enrichAccounts(buildAccounts()).map((a) => (discover ? { ...a, status: "Discovered" as const } : a));
   const baseSubs = withPostUnsubscribeMails(buildSubscriptions());
   const mailboxes: MailboxDto[] = empty ? [] : MAILBOXES.map((address, i) => ({
     id: `m${i}`, address, imap_host: i ? "imap.web.de" : "imap.gmail.com", imap_port: 993, username: address,

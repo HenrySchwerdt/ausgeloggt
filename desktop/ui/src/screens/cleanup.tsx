@@ -4,7 +4,7 @@ import { ArrowLeft, Check, ExternalLink, FileText, Search, Sparkles } from "luci
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
-import { openUrl } from "@/lib/platform";
+import { openDeletionPage } from "@/lib/actions";
 import { isTyping, useAsync } from "@/lib/hooks";
 import { DIFFICULTY_LABEL, RISK_REASON_LABEL, type Account, type BillingSummary, type RiskAssessment } from "@/lib/types";
 import { de, errorMessage, money } from "@/lib/utils";
@@ -12,12 +12,13 @@ import { Dot, EmptyState, ErrorState, PageHeader, riskDot, ServiceLogo } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Segmented } from "@/components/ui/segmented";
 import { RowsSkeleton } from "@/components/ui/skeleton";
 import { VirtualList } from "@/components/virtual-list";
 import { openLetter } from "@/components/letter-dialog";
 
-const OPEN = new Set(["Discovered", "Confirmed"]);
+const OPEN = new Set(["Confirmed", "DeletionPending"]);
 
 function useQueue() {
   const snap = useStore((s) => s.snap)!;
@@ -40,7 +41,7 @@ function startCancel(a: Account) {
 
 export function CleanupPage({ tidy }: { tidy: boolean }) {
   const q = useQueue();
-  if (!q.ins) return <div className="p-7"><PageHeader title="Löschen und Kündigen" /><RowsSkeleton className="mt-6 -mx-7" /></div>;
+  if (!q.ins) return <div className="p-7"><PageHeader title="Aufräumen" /><RowsSkeleton className="mt-6 -mx-7" /></div>;
   return tidy ? <Tidy {...q} /> : <CleanupList {...q} />;
 }
 
@@ -51,8 +52,6 @@ function CleanupList({ rows, risk, bill }: Q) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "sub">("all");
   const [active, setActive] = useState(-1);
-  const [opened, setOpened] = useState<Set<string>>(new Set());
-  const [later, setLater] = useState<Set<string>>(new Set());
   const catalogs = useAsync(async () => {
     const out = new Map<string, Awaited<ReturnType<typeof api.data.catalogInfo>>>();
     // Load lazily for the first rows only; the rest resolves on click.
@@ -61,7 +60,6 @@ function CleanupList({ rows, risk, bill }: Q) {
   }, [rows.length]);
 
   const list = rows
-    .filter((a) => !later.has(a.id))
     .filter((a) => filter === "all" || bill.get(a.id)?.active_subscription)
     .filter((a) => { const s = query.trim().toLowerCase(); return !s || a.name.toLowerCase().includes(s) || a.domain.includes(s); });
   const subs = rows.filter((a) => bill.get(a.id)?.active_subscription).length;
@@ -71,17 +69,16 @@ function CleanupList({ rows, risk, bill }: Q) {
     if (!info) { try { info = await api.data.catalogInfo({ domain: a.domain, name: a.name }); } catch (e) { toast.error(errorMessage(e)); } }
     const url = info?.deletion?.url;
     if (!url) return startErasure(a);
-    await openUrl(url);
-    setOpened((s) => new Set(s).add(a.id));
+    await openDeletionPage(a, url);
   };
 
   return (
     <div className="flex h-full min-w-0 flex-col">
       <div className="flex flex-col gap-4 px-7 pb-3 pt-7">
         <PageHeader
-          title="Löschen und Kündigen"
-          description={`${rows.length} offene Accounts, nach Risiko sortiert`}
-          actions={<Button variant="primary" onClick={() => navigate({ page: "cleanup", tidy: true })} disabled={rows.length === 0}><Sparkles /> Aufräumen</Button>}
+          title="Aufräumen"
+          description={`${rows.length} ${rows.length === 1 ? "Account" : "Accounts"} zum Löschen oder Kündigen, nach Risiko sortiert`}
+          actions={<Tooltip content="Wir führen dich Account für Account durch Löschen, Kündigen oder Behalten."><Button variant="primary" onClick={() => navigate({ page: "cleanup", tidy: true })} disabled={rows.length === 0}><Sparkles /> Schritt für Schritt</Button></Tooltip>}
         />
         <div className="flex items-center gap-2">
           <Segmented value={filter} onChange={setFilter} options={[{ value: "all", label: "Alle", count: rows.length }, { value: "sub", label: "Mit Abo", count: subs }]} />
@@ -98,9 +95,9 @@ function CleanupList({ rows, risk, bill }: Q) {
       {list.length === 0 ? (
         <EmptyState
           icon={Check} className="flex-1"
-          title={rows.length === 0 ? "Nichts mehr offen" : "Nichts gefunden"}
-          description={rows.length === 0 ? "Neu entdeckte Accounts erscheinen hier, sobald du eine Quelle scannst." : undefined}
-          action={rows.length === 0 ? <Button onClick={() => navigate({ page: "sources" })}>Zu den Quellen</Button> : undefined}
+          title={rows.length === 0 ? "Nichts zum Aufräumen" : "Nichts gefunden"}
+          description={rows.length === 0 ? "Hier erscheinen Accounts, bei denen du „Ja, hab ich“ gewählt hast. Dann löschst, kündigst oder behältst du sie." : undefined}
+          action={rows.length === 0 ? <Button variant="primary" onClick={() => navigate({ page: "review" })}>Funde prüfen</Button> : undefined}
         />
       ) : (
         <VirtualList
@@ -110,7 +107,7 @@ function CleanupList({ rows, risk, bill }: Q) {
             const b = bill.get(a.id);
             const info = catalogs.data?.get(a.id);
             const diff = info?.deletion ? DIFFICULTY_LABEL[info.deletion.difficulty] : null;
-            const isOpened = opened.has(a.id);
+            const running = a.status === "DeletionPending";
             return (
               <div className={`group flex h-full items-center gap-3 border-b border-border px-7 transition-colors ${act ? "bg-muted/70" : "hover:bg-muted/60"}`}>
                 <ServiceLogo name={a.name} domain={a.domain} />
@@ -127,18 +124,20 @@ function CleanupList({ rows, risk, bill }: Q) {
                   {diff && <><Dot className={diff.dot} />{diff.label}</>}
                 </span>
                 <div className="flex w-[250px] shrink-0 justify-end gap-1.5">
-                  {isOpened ? (
+                  {running ? (
                     <>
-                      <Button variant="ghost" onClick={() => setOpened((s) => { const n = new Set(s); n.delete(a.id); return n; })}>Zurück</Button>
-                      <Button variant="primary" onClick={() => void setStatus([a.id], "Deleted")}><Check /> Erledigt</Button>
+                      <span className="flex items-center gap-2 pr-1 text-base text-fg-muted"><Dot className="bg-s-yellow" />Löschung läuft</span>
+                      <Tooltip content="Der Dienst hat den Account gelöscht oder es ist nichts mehr zu tun."><Button variant="secondary" onClick={() => void setStatus([a.id], "Deleted")}><Check /> Ist gelöscht</Button></Tooltip>
                     </>
                   ) : (
                     <>
-                      {b?.active_subscription && <Button variant="secondary" onClick={() => startCancel(a)}>Kündigen</Button>}
-                      <Button variant="secondary" onClick={() => void del(a)}>
-                        {info && !info.deletion?.url ? <><FileText /> Löschantrag</> : <>Löschen <ExternalLink /></>}
-                      </Button>
-                      <Button variant="ghost" onClick={() => setLater((s) => new Set(s).add(a.id))} aria-label="Später">Später</Button>
+                      {b?.active_subscription && <Tooltip content="Erst kündigen, sonst läuft das Abo weiter. Wir bereiten die Kündigung vor."><Button variant="secondary" onClick={() => startCancel(a)}>Kündigen</Button></Tooltip>}
+                      <Tooltip content="Was passiert beim Löschen? Wir öffnen die Löschseite des Dienstes. Danach markierst du es hier als erledigt.">
+                        <Button variant="secondary" onClick={() => void del(a)}>
+                          {info && !info.deletion?.url ? <><FileText /> Löschantrag</> : <>Löschen <ExternalLink /></>}
+                        </Button>
+                      </Tooltip>
+                      <Tooltip content="Du behältst den Account. Er verschwindet aus dieser Liste."><Button variant="ghost" onClick={() => void setStatus([a.id], "Keep")}>Behalten</Button></Tooltip>
                     </>
                   )}
                 </div>
@@ -171,10 +170,10 @@ function Tidy({ rows, risk, bill }: Q) {
   const next = (k: keyof typeof done) => { setDone((d) => ({ ...d, [k]: d[k] + 1 })); setI((n) => n + 1); setOpened(false); };
   const openLink = async () => {
     if (!a) return;
-    if (info?.url) { await openUrl(info.url); setOpened(true); } else startErasure(a);
+    if (info?.url) { await openDeletionPage(a, info.url); setOpened(true); } else startErasure(a);
   };
-  const finish = async () => { if (a) { await setStatus([a.id], "Deleted", true); next("erledigt"); } };
-  const keep = async () => { if (a) { await setStatus([a.id], "Keep", true); next("behalten"); } };
+  const finish = async () => { if (a) { await setStatus([a.id], "Deleted"); next("erledigt"); } };
+  const keep = async () => { if (a) { await setStatus([a.id], "Keep"); next("behalten"); } };
   const skip = () => next("spaeter");
 
   const fns = useRef({ openLink, finish, keep, skip });
