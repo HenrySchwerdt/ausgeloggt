@@ -114,6 +114,20 @@ impl Vault {
         Self::create_with_params(path, password, KdfParams::DEFAULT)
     }
 
+    /// Cheap-KDF variant for tests of dependent crates (never use for real vaults).
+    #[doc(hidden)]
+    pub fn create_for_tests(path: &Path, password: &str) -> Result<Self, VaultError> {
+        Self::create_with_params(
+            path,
+            password,
+            KdfParams {
+                m_cost_kib: 64,
+                t_cost: 1,
+                p_cost: 1,
+            },
+        )
+    }
+
     pub(crate) fn create_with_params(
         path: &Path,
         password: &str,

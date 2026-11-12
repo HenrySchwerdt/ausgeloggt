@@ -20,6 +20,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 serde.workspace = true
 serde_json.workspace = true
 ausgeloggt-core.workspace = true
@@ -27,3 +29,13 @@ ausgeloggt-import.workspace = true
 ausgeloggt-mail.workspace = true
 ausgeloggt-catalog.workspace = true
 ausgeloggt-ai.workspace = true
+ausgeloggt-breach.workspace = true
+ausgeloggt-letters.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+log.workspace = true
+sha2 = "0.10"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tempfile = "3"
