@@ -190,6 +190,9 @@ mod tests {
             deadline: Some(now - ChronoDuration::days(9)),
             status: RequestStatus::Sent,
             notes: String::new(),
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         }
     }
 

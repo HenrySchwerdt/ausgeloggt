@@ -1731,6 +1731,9 @@ mod tests {
             deadline,
             status,
             notes: String::new(),
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         };
         let late2 = mk(RequestStatus::Sent, Some(ago(2)));
         let late9 = mk(RequestStatus::Sent, Some(ago(9)));
@@ -1817,6 +1820,7 @@ mod tests {
             status,
             history: vec![],
             post_unsubscribe_mails: vec![],
+            last_message_id: None,
         }
     }
 
@@ -1907,6 +1911,9 @@ mod tests {
             deadline,
             status,
             notes: String::new(),
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         };
         let data = VaultData {
             requests: vec![

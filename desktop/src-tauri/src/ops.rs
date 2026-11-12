@@ -193,6 +193,7 @@ mod tests {
             status: SubscriptionStatus::Active,
             history: vec![],
             post_unsubscribe_mails: vec![],
+            last_message_id: None,
         }
     }
 

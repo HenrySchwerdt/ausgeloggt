@@ -577,6 +577,7 @@ fn risk_and_score_fuzz_stay_in_bounds() {
                 },
                 history: vec![],
                 post_unsubscribe_mails: vec![],
+                last_message_id: None,
             });
         }
     }
@@ -603,6 +604,9 @@ fn risk_and_score_fuzz_stay_in_bounds() {
                 _ => RequestStatus::Done,
             },
             notes: String::new(),
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         });
     }
     let ctx = RiskContext {
@@ -657,6 +661,9 @@ fn overdue_boundaries() {
         deadline,
         status,
         notes: String::new(),
+        message_id: None,
+        mailbox_id: None,
+        attachment: None,
     };
     data.requests.push(mk(Some(now()), RequestStatus::Sent)); // exactly now: not overdue yet
     data.requests

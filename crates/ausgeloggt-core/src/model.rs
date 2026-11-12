@@ -28,6 +28,58 @@ pub struct VaultData {
     /// objection, cancellation, cease-and-desist, complaints) with deadlines.
     #[serde(default)]
     pub requests: Vec<DataRequest>,
+    /// Automation rules (scheduled rescans, erasure requests, reminders).
+    #[serde(default)]
+    pub automations: Vec<AutomationRule>,
+    /// Per mailbox send counters (rate limiting survives restarts).
+    #[serde(default)]
+    pub send_counters: Vec<SendCounter>,
+}
+
+/// Persisted rate limiting state of one mailbox: mails sent on `day` (local date
+/// `YYYY-MM-DD`) and the time of the last mail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendCounter {
+    pub mailbox_id: Uuid,
+    pub day: String,
+    pub count: u32,
+    pub last_sent: Option<DateTime<Utc>>,
+}
+
+/// A recurring automatic run for one mailbox. Only accounts the user queued
+/// (`Account::queued_for_deletion`) are ever contacted automatically.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutomationRule {
+    pub id: Uuid,
+    pub mailbox_id: Uuid,
+    #[serde(default)]
+    pub enabled: bool,
+    /// Interval in days (1, 7, 14 or 30).
+    #[serde(default = "default_every_days")]
+    pub every_days: u32,
+    /// Local hour of the day (0..=23) from which the run is due.
+    #[serde(default)]
+    pub hour: u8,
+    /// Rescan the mailbox first.
+    #[serde(default)]
+    pub rescan: bool,
+    /// Send erasure requests for queued accounts without an open request.
+    #[serde(default)]
+    pub send_erasure_for_queue: bool,
+    /// Send reminders for overdue requests.
+    #[serde(default)]
+    pub send_reminders: bool,
+    /// Prepare complaint drafts (never sent automatically) after a missed reminder deadline.
+    #[serde(default)]
+    pub prepare_complaints: bool,
+    #[serde(default)]
+    pub last_run: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_result: String,
+}
+
+fn default_every_days() -> u32 {
+    7
 }
 
 /// A newsletter / mailing list sending to one of the user's mailboxes.
@@ -67,6 +119,10 @@ pub struct Subscription {
     /// for objections / cease-and-desist letters. Deduplicated by Message-ID.
     #[serde(default)]
     pub post_unsubscribe_mails: Vec<MailRef>,
+    /// Message-ID of the newest mail of this list seen in a scan (to find the mail again
+    /// when the user needs a manual unsubscribe link).
+    #[serde(default)]
+    pub last_message_id: Option<String>,
 }
 
 /// Reference to one received mail, kept as evidence.
@@ -186,6 +242,9 @@ pub struct SubscriptionObservation {
     /// Mails of lists the scan was asked to watch (unsubscribed lists), as evidence.
     #[serde(default)]
     pub watched_mails: Vec<MailRef>,
+    /// Message-ID of the newest mail of the list in this scan.
+    #[serde(default)]
+    pub last_message_id: Option<String>,
 }
 
 /// One online account at one service.
@@ -224,6 +283,9 @@ pub struct Account {
     pub payments: Vec<PaymentRecord>,
     #[serde(default)]
     pub security: SecurityInfo,
+    /// The user wants an erasure request sent automatically ("Antrag automatisch senden").
+    #[serde(default)]
+    pub queued_for_deletion: bool,
 }
 
 impl Account {
@@ -249,6 +311,7 @@ impl Account {
             updated_at: now,
             payments: Vec::new(),
             security: SecurityInfo::default(),
+            queued_for_deletion: false,
         }
     }
 }
@@ -633,6 +696,16 @@ pub struct Settings {
     pub auto_rescan_days: u32,
     /// Desktop notifications for deadlines, new accounts, breaches, renewals.
     pub notifications: bool,
+    /// Minimum gap between two mails sent from one mailbox, in seconds.
+    pub send_gap_seconds: u32,
+    /// Maximum mails per mailbox and day (0 = provider default: 40, Gmail 100).
+    pub daily_send_cap: u32,
+    /// Keep running in the tray when the window is closed.
+    pub start_minimized_to_tray: bool,
+    /// Start with the operating system.
+    pub autostart: bool,
+    /// Do not auto-lock while automations are enabled (weakens protection).
+    pub keep_unlocked_for_automation: bool,
 }
 
 impl Default for Settings {
@@ -652,6 +725,11 @@ impl Default for Settings {
             read_receipt_bodies: false,
             auto_rescan_days: 7,
             notifications: true,
+            send_gap_seconds: 20,
+            daily_send_cap: 0,
+            start_minimized_to_tray: false,
+            autostart: false,
+            keep_unlocked_for_automation: false,
         }
     }
 }
@@ -900,6 +978,15 @@ pub struct DataRequest {
     pub status: RequestStatus,
     #[serde(default)]
     pub notes: String,
+    /// Message-ID of the mail as sent (proof; matches the copy in the Sent folder).
+    #[serde(default)]
+    pub message_id: Option<String>,
+    /// Mailbox the mail was sent from.
+    #[serde(default)]
+    pub mailbox_id: Option<Uuid>,
+    /// File name of the attached PDF, if any.
+    #[serde(default)]
+    pub attachment: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

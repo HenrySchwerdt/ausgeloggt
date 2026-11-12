@@ -310,6 +310,7 @@ mod tests {
             sample_subjects: vec![],
             category: MailCategory::Marketing,
             watched_mails: vec![],
+            last_message_id: None,
         }
     }
 
@@ -339,6 +340,7 @@ mod tests {
                 message: "ok".into(),
             }],
             post_unsubscribe_mails: vec![],
+            last_message_id: None,
         }
     }
 

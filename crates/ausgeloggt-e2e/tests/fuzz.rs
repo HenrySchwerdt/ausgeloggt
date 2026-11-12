@@ -463,6 +463,7 @@ fn merge_functions_never_panic_and_stay_idempotent() {
                 sample_subjects: vec![pick_nasty(&mut rng)],
                 category: MailCategory::Marketing,
                 watched_mails: vec![],
+                last_message_id: None,
             })
             .collect();
         let pays: Vec<PaymentObservation> = (0..rng.range(0, 10))

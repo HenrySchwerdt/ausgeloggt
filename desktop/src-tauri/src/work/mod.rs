@@ -4,4 +4,5 @@ pub mod ai;
 pub mod breach;
 pub mod import;
 pub mod scan;
+pub mod send;
 pub mod unsub;

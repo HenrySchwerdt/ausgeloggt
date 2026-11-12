@@ -980,3 +980,169 @@ export async function runJob<P = unknown>(
     unDone();
   }
 }
+
+// ============================================================================
+// Sending and automation (backend phase 3; docs/IPC.md "Sending and automation")
+// Declaration merging adds the new fields to the existing interfaces above.
+// ============================================================================
+
+export interface Account {
+  /** The user wants an erasure request sent automatically. */
+  queued_for_deletion?: boolean;
+}
+
+export interface DataRequest {
+  /** Message-ID of the mail as sent (matches the copy in the Sent folder). */
+  message_id?: string | null;
+  mailbox_id?: Uuid | null;
+  /** File name of the attached PDF. */
+  attachment?: string | null;
+}
+
+export interface Subscription {
+  last_message_id?: string | null;
+}
+
+export interface SettingsDto {
+  /** Seconds between two mails from one mailbox (default 20). */
+  send_gap_seconds?: number;
+  /** Mails per mailbox and day; 0 = automatic (40, Gmail 100). */
+  daily_send_cap?: number;
+  start_minimized_to_tray?: boolean;
+  autostart?: boolean;
+  /** Skip auto-lock while an automation is enabled. Weakens protection, show a warning. */
+  keep_unlocked_for_automation?: boolean;
+}
+
+export interface SnapshotDto {
+  automations?: AutomationRule[];
+}
+
+export interface AutomationRule {
+  id: Uuid;
+  mailbox_id: Uuid;
+  enabled: boolean;
+  /** 1, 7, 14 or 30. */
+  every_days: number;
+  /** Local hour 0..23. */
+  hour: number;
+  rescan: boolean;
+  send_erasure_for_queue: boolean;
+  send_reminders: boolean;
+  /** Only prepares drafts, complaints are never sent automatically. */
+  prepare_complaints: boolean;
+  last_run: string | null;
+  last_result: string;
+}
+
+/** Input of `automation_upsert`: `id` optional (new rule), `last_*` are ignored. */
+export type AutomationRuleInput = Omit<AutomationRule, "id" | "last_run" | "last_result"> & {
+  id?: Uuid;
+};
+
+export interface BulkSendItem {
+  kind: LetterKind;
+  accountId: Uuid;
+  recipient?: Party;
+}
+
+export interface SendCheck {
+  ok: { accountId: Uuid; name: string; recipientEmail: string; subject: string }[];
+  problems: { accountId: Uuid; reason: string }[];
+  remainingToday: number;
+  dailyCap: number;
+  gapSeconds: number;
+}
+
+/** `job://done` payload of `letter_send`. */
+export interface LetterSendResult {
+  requestId: Uuid;
+  messageId: string;
+  sentAt: string;
+  appendedTo: string | null;
+  appendError: string | null;
+}
+
+/** `job://done` payload of `letters_send_bulk`. */
+export interface BulkSendResult {
+  sent: number;
+  failed: number;
+  skipped: number;
+  capReached: boolean;
+  results: {
+    id: Uuid;
+    ok: boolean;
+    skipped: boolean;
+    message: string;
+    reason: "Skipped" | "Blocked" | "CapReached" | "SendFailed" | null;
+  }[];
+}
+
+/** `job://done` payload of an automation run. */
+export interface AutomationRunResult {
+  runs: { ruleId: Uuid; summary: string; failed: number }[];
+}
+
+export type UnsubscribeFailureReason =
+  | "Http"
+  | "Network"
+  | "UnsafeTarget"
+  | "NoAutomaticMethod"
+  | "Refused"
+  | "Smtp";
+
+/** Per item result in the `unsubscribe` job payload and its progress `item`. */
+export interface UnsubscribeItemResult {
+  id: Uuid;
+  ok: boolean;
+  skipped?: boolean;
+  message: string;
+  reason: UnsubscribeFailureReason | null;
+}
+
+export interface ManualLink {
+  url: string;
+  source: "header" | "mail";
+  label: string;
+}
+
+export interface ManualLinks {
+  links: ManualLink[];
+  mailto?: string;
+}
+
+export const sending = {
+  /** Builds the same letter as `letter_preview`, sends it and records the request. */
+  letterSend: (a: {
+    kind: LetterKind;
+    accountId?: Uuid;
+    subscriptionId?: Uuid;
+    requestId?: Uuid;
+    orgId?: string;
+    authorityState?: string;
+    recipient?: Party;
+    mailboxId: Uuid;
+    attachPdf: boolean;
+  }) => call<JobId>("letter_send", a),
+  lettersSendBulk: (items: BulkSendItem[], mailboxId: Uuid, attachPdf: boolean) =>
+    call<JobId>("letters_send_bulk", { items, mailboxId, attachPdf }),
+  /** Dry run of the bulk send, nothing is sent. */
+  lettersSendCheck: (items: BulkSendItem[], mailboxId: Uuid, attachPdf = false) =>
+    call<SendCheck>("letters_send_check", { items, mailboxId, attachPdf }),
+  accountSetQueued: (ids: Uuid[], queued: boolean) =>
+    call<void>("account_set_queued", { ids, queued }),
+};
+
+export const automations = {
+  list: () => call<AutomationRule[]>("automation_list"),
+  upsert: (rule: AutomationRuleInput) => call<Uuid>("automation_upsert", { rule }),
+  remove: (id: Uuid) => call<void>("automation_remove", { id }),
+  runNow: (id: Uuid) => call<JobId>("automation_run_now", { id }),
+  autostartSet: (enabled: boolean) => call<void>("autostart_set", { enabled }),
+};
+
+export const unsubscribeFallback = {
+  /** Header links always; `fromMail` additionally reads the newest mail of the list (explicit click). */
+  manualLinks: (subscriptionId: Uuid, fromMail = false) =>
+    call<ManualLinks>("unsubscribe_manual_links", { subscriptionId, fromMail }),
+};

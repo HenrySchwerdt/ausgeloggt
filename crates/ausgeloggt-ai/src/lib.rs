@@ -699,6 +699,7 @@ mod tests {
             status: Default::default(),
             history: vec![],
             post_unsubscribe_mails: Vec::new(),
+            last_message_id: None,
         }
     }
 

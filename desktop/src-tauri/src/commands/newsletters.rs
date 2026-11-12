@@ -32,6 +32,24 @@ pub async fn unsubscribe_start(state: State<'_, AppState>, ids: Vec<Uuid>) -> Ip
 }
 
 #[tauri::command]
+pub async fn unsubscribe_manual_links(
+    state: State<'_, AppState>,
+    subscription_id: Uuid,
+    from_mail: Option<bool>,
+) -> IpcResult<serde_json::Value> {
+    let st = state.inner().clone();
+    super::blocking(move || {
+        unsub::manual_links(
+            &st,
+            subscription_id,
+            from_mail.unwrap_or(false),
+            unsub::real_link_fetcher(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn ai_classify_start(state: State<'_, AppState>) -> IpcResult<String> {
     ai::start_classify(&state, ai::real_classifier())
 }

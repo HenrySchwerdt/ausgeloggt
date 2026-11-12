@@ -245,6 +245,7 @@ mod tests {
             updated_at: now,
             payments: Vec::new(),
             security: Default::default(),
+            queued_for_deletion: false,
         }
     }
 

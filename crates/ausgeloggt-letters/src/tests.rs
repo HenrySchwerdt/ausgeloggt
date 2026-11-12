@@ -97,6 +97,7 @@ fn subscription(n_mails: u32) -> Subscription {
             },
         ],
         post_unsubscribe_mails: (0..n_mails).map(mail).collect(),
+        last_message_id: None,
     }
 }
 
@@ -118,6 +119,7 @@ fn request(kind: RequestKind) -> DataRequest {
         deadline: Some(Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap()),
         status: RequestStatus::Sent,
         notes: String::new(),
+    message_id: None, mailbox_id: None, attachment: None,
     }
 }
 

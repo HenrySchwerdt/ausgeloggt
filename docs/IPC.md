@@ -94,6 +94,62 @@ Conventions
 | `request_remove` | `{ id }` | `()` |
 | `mailto_url` | `{ to?, subject, body }` | `string` |
 
+## Sending and automation
+
+Mails are sent through the mailbox's own SMTP server (same credentials as IMAP, `smtp_for`), a copy is
+appended to the IMAP Sent folder (SPECIAL-USE `\Sent`, else "Sent", "Gesendet", "Gesendete Objekte" ...; skipped for
+Gmail, which stores sent mail itself). Recipients only ever come from the catalog or from what the user typed.
+Nothing is logged (no bodies, no addresses).
+
+Model additions (all `#[serde(default)]`): `DataRequest.message_id | mailbox_id | attachment`,
+`Account.queued_for_deletion` (the user's "Antrag automatisch senden"), `Subscription.last_message_id`,
+`VaultData.automations: AutomationRule[]` (also in `get_snapshot` as `automations`), `VaultData.send_counters`
+(rate limit state, not in the snapshot), `Settings.send_gap_seconds` (20), `daily_send_cap` (0 = automatic: 40, Gmail 100),
+`start_minimized_to_tray`, `autostart`, `keep_unlocked_for_automation` (false).
+`AutomationRule = { id, mailbox_id, enabled, every_days (1|7|14|30), hour (0..23, local time), rescan, send_erasure_for_queue,
+send_reminders, prepare_complaints, last_run, last_result }`.
+
+| Command | Args | Returns |
+|---|---|---|
+| `letter_send` | `{ kind, accountId?, subscriptionId?, requestId?, orgId?, authorityState?, recipient?, mailboxId, attachPdf }` | `JobId` (job kind `send`). Builds the same letter as `letter_preview`; `Invalid` (German message) if sender fields or the recipient mail address are missing or the mailbox has no password. Waits for the rate limit gap (cancelable), sends, creates the `DataRequest` (status `Sent`, channel `Email`, deadline as for `request_create`, `message_id`, `mailbox_id`, `attachment`; `parent_id` = `requestId` for Reminder / Complaint). `job://done` payload `{ requestId, messageId, sentAt, appendedTo, appendError }`. A sent erasure clears `queued_for_deletion`. |
+| `letters_send_check` | `{ items: [{ kind, accountId, recipient? }], mailboxId, attachPdf? }` | `{ ok: [{ accountId, name, recipientEmail, subject }], problems: [{ accountId, reason }], remainingToday, dailyCap, gapSeconds }`. Dry run, sends nothing. Problems: missing sender data / recipient mail address / mailbox password, kind not allowed (only Erasure, Access, ObjectionAndAccess, Cancellation), duplicate in the selection, or an account that already has a non draft request of the same kind. |
+| `letters_send_bulk` | same as check | `JobId` (kind `send`). Plans like the check, then sends sequentially honoring gap and daily cap, cancelable. Per item progress `item = { id: accountId, ok, message, reason }`. Stops sending at the daily cap (`reason: "CapReached"`, rest `"Blocked"`) or on a login failure; other failures continue. Payload `{ sent, failed, skipped, capReached, results: [{ id, ok, skipped, message, reason }] }`; `reason` is `Skipped`, `Blocked`, `CapReached`, `SendFailed` or `null`. Partial failures end with `ok: false`. |
+| `account_set_queued` | `{ ids, queued }` | `()` |
+| `automation_list` | – | `AutomationRule[]` |
+| `automation_upsert` | `{ rule }` (`id` optional for a new rule; `last_run` / `last_result` are ignored) | `Uuid`. One rule per mailbox, interval 1, 7, 14 or 30, hour 0..23. A new or newly enabled rule starts counting now (it never fires immediately; use `automation_run_now`). |
+| `automation_remove` | `{ id }` | `()` |
+| `automation_run_now` | `{ id }` | `JobId` (kind `automation`; shares the exclusion group `send`). Payload `{ runs: [{ ruleId, summary, failed }] }`. |
+| `autostart_set` | `{ enabled }` | `()` (tauri-plugin-autostart, launches with `--minimized`; also stores `settings.autostart`) |
+| `unsubscribe_manual_links` | `{ subscriptionId, fromMail?: bool }` | `{ links: [{ url, source: "header" \| "mail", label }], mailto?: string }`. `header`: http(s) URLs of the stored List-Unsubscribe methods (OneClick and Link) plus the mailto address. `fromMail: true` (explicit click only) additionally fetches the newest mail of the list by `Subscription.last_message_id` (`UID SEARCH HEADER Message-ID`, body capped at 200 KB, never kept) and returns links whose anchor text or URL contains unsubscribe words (de, en, fr, es, nl, it), deduplicated, https first, max 5. The links themselves are never fetched; the UI opens them in the browser. `Invalid` if no Message-ID is stored yet (rescan the mailbox). |
+
+Rate limiting (per mailbox, persisted in the vault, local calendar day): minimum gap `settings.send_gap_seconds`
+(max 3600) and daily cap `settings.daily_send_cap` (0 = 40, Gmail 100). Sending jobs wait for the gap; at the cap a single
+`letter_send` fails with `Invalid` ("Tageslimit ... erreicht"), bulk and automation runs stop and report it.
+
+Automation run (rule order): rescan (if set, skipped while a scan job runs) → erasure requests for accounts with
+`queued_for_deletion` that belong to the mailbox (an identifier equals the mailbox address; with exactly one mailbox every account
+without a foreign address belongs to it), are not Keep / Deleted / NotAnAccount / Ignored and have no non draft Erasure request →
+Reminder letters (`parent_id` link) for overdue `Sent` email requests sent from this mailbox (`mailbox_id`) that have no reminder yet →
+a `Complaint` request as DRAFT (never sent) for originals whose reminder deadline also passed. Never contacts accounts the user did not
+queue, never sends the same kind twice to an account. `last_run` / `last_result` are written after each run and one notification
+summarises it (if `settings.notifications` and something happened).
+
+Scheduler: `automation::tick` every 60 s while the app runs (also hidden in the tray). A rule is due when enabled and
+`last_run + every_days` at `hour` (local time, DST safe: a non existing hour moves to the next one, an ambiguous hour takes the first)
+has passed; missed runs happen once, not repeatedly. While the vault is locked nothing runs; the notification
+"Automatik pausiert, Tresor gesperrt" is shown once per lock and due rules run after the next unlock. Auto-lock still applies unless
+`settings.keep_unlocked_for_automation` is on and an automation is enabled (the UI must warn that this keeps the vault readable in
+memory).
+
+Tray and autostart: tray icon with Öffnen, Jetzt prüfen (runs all enabled automations now), Sperren, Beenden. Closing the window hides
+to the tray when any automation is enabled or `settings.start_minimized_to_tray`; otherwise the app quits as before.
+
+Unsubscribe job results (`unsubscribe_start`) carry a machine readable failure `reason` per item (progress `item.reason` and
+`payload.results[].reason`): `Http`, `Network`, `UnsafeTarget`, `NoAutomaticMethod`, `Refused`, `Smtp`, or `null` (success / not
+found). Use it to choose the fallback (`unsubscribe_manual_links`).
+
+Job kinds `send` and `automation` are mutually exclusive (`Busy`), so two jobs never contact the same account.
+
 ## Settings and AI
 
 | Command | Args | Returns |
@@ -126,7 +182,7 @@ after a scan, breaches found, upcoming renewals (3 days before), mails despite u
 
 ## Backend notes (implementation)
 
-- Job kinds: `scan`, `import`, `unsubscribe`, `ai_classify`, `screenshot_read`, `breach_check`, `catalog_refresh`.
+- Job kinds: `scan`, `import`, `unsubscribe`, `ai_classify`, `screenshot_read`, `breach_check`, `catalog_refresh`, `send`, `automation`.
   Only one job per kind runs at a time (`Busy` otherwise). Locking the vault cancels all jobs.
 - Cancelled jobs finish with `job://done { ok: false, summary: "Abgebrochen" }` and no `error`; nothing from a cancelled scan is merged.
 - A job that ends with partial failures (e.g. one of three mailboxes unreachable) still finishes normally:

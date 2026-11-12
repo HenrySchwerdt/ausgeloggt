@@ -4,12 +4,14 @@
 use ausgeloggt_core::model::{
     MailCategory, MailboxConfig, Subscription, SubscriptionStatus, UnsubscribeAttempt,
 };
+use ausgeloggt_mail::manual::{self, ManualLink};
 use ausgeloggt_mail::unsubscribe::{self, UnsubscribeError};
+use ausgeloggt_mail::MailError;
 use chrono::Utc;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::error::IpcError;
+use crate::error::{IpcError, IpcResult};
 use crate::jobs::{JobCtx, JobOutcome, JobResult};
 use crate::state::AppState;
 
@@ -34,25 +36,85 @@ pub fn start_unsubscribe(
     })
 }
 
+pub type LinkFetcher =
+    dyn Fn(&MailboxConfig, &Subscription) -> Result<Vec<ManualLink>, MailError> + Send + Sync;
+
+pub fn real_link_fetcher() -> &'static LinkFetcher {
+    &manual::fetch_mail_links
+}
+
+/// `unsubscribe_manual_links`: links the user can open in the browser. Header links
+/// (stored `List-Unsubscribe` methods) always; links found in the newest mail of the list
+/// only if `from_mail` (explicit request, one IMAP fetch, body dropped). Nothing is opened
+/// or fetched from the links themselves.
+pub fn manual_links(
+    state: &AppState,
+    id: Uuid,
+    from_mail: bool,
+    fetch: &LinkFetcher,
+) -> IpcResult<Value> {
+    let (sub, mailbox) = state.read(|d| {
+        let sub = d.subscriptions.iter().find(|s| s.id == id).cloned();
+        let mb = sub.as_ref().and_then(|s| {
+            d.mailboxes
+                .iter()
+                .find(|m| m.address.eq_ignore_ascii_case(&s.mailbox))
+                .cloned()
+        });
+        (sub, mb)
+    })?;
+    let sub = sub.ok_or_else(|| IpcError::not_found("Newsletter"))?;
+    let (mut links, mailto) = manual::header_links(&sub);
+    if from_mail {
+        let mailbox = mailbox.ok_or_else(|| {
+            IpcError::invalid("Das zugehörige Postfach ist nicht mehr eingerichtet")
+        })?;
+        for l in fetch(&mailbox, &sub)? {
+            if !links.iter().any(|x| x.url == l.url) {
+                links.push(l);
+            }
+        }
+    }
+    let mut out = json!({ "links": links });
+    if let (Some(m), Some(obj)) = (mailto, out.as_object_mut()) {
+        obj.insert("mailto".into(), json!(m));
+    }
+    Ok(out)
+}
+
+/// Machine readable failure reason for the UI (which fallback to offer).
+pub fn failure_reason(e: &UnsubscribeError) -> &'static str {
+    match e {
+        UnsubscribeError::NoAutomaticMethod => "NoAutomaticMethod",
+        UnsubscribeError::Http(_) => "Http",
+        UnsubscribeError::Network(_) => "Network",
+        UnsubscribeError::UnsafeTarget => "UnsafeTarget",
+        UnsubscribeError::Smtp(_) => "Smtp",
+        UnsubscribeError::Refused => "Refused",
+    }
+}
+
 enum Plan {
-    Skip(String),
+    Skip(String, Option<&'static str>),
     Run(Box<Subscription>, Box<MailboxConfig>),
 }
 
 fn plan(state: &AppState, id: Uuid) -> Result<Plan, IpcError> {
     state.read(|d| {
         let Some(sub) = d.subscriptions.iter().find(|s| s.id == id) else {
-            return Plan::Skip("Newsletter nicht gefunden".into());
+            return Plan::Skip("Newsletter nicht gefunden".into(), None);
         };
         if sub.category == MailCategory::Transactional {
             return Plan::Skip(
                 "Wichtige Mails (Rechnungen, Konto Hinweise) werden nicht automatisch abbestellt"
                     .into(),
+                Some("Refused"),
             );
         }
         if unsubscribe::best_automatic(sub).is_none() {
             return Plan::Skip(
                 "Kein automatischer Weg vorhanden, bitte den Link im Browser öffnen".into(),
+                Some("NoAutomaticMethod"),
             );
         }
         match d
@@ -61,7 +123,10 @@ fn plan(state: &AppState, id: Uuid) -> Result<Plan, IpcError> {
             .find(|m| m.address.eq_ignore_ascii_case(&sub.mailbox))
         {
             Some(mb) => Plan::Run(Box::new(sub.clone()), Box::new(mb.clone())),
-            None => Plan::Skip("Das zugehörige Postfach ist nicht mehr eingerichtet".into()),
+            None => Plan::Skip(
+                "Das zugehörige Postfach ist nicht mehr eingerichtet".into(),
+                None,
+            ),
         }
     })
 }
@@ -79,18 +144,21 @@ pub fn unsubscribe_job(
         ctx.check()?;
         let done = i as u64 + 1;
         match plan(state, *id)? {
-            Plan::Skip(reason) => {
+            Plan::Skip(message, reason) => {
                 skipped_n += 1;
-                ctx.item(done, total, id.to_string(), false, reason.clone());
-                results.push(json!({ "id": id, "ok": false, "skipped": true, "message": reason }));
+                ctx.item_reason(done, total, id.to_string(), false, message.clone(), reason);
+                results.push(json!({ "id": id, "ok": false, "skipped": true, "message": message, "reason": reason }));
             }
             Plan::Run(sub, mailbox) => {
                 ctx.progress(done - 1, total, format!("Melde ab: {}", sub.name));
                 // Network without the vault lock.
                 let result = run(&sub, &mailbox);
-                let (ok, message) = match result {
-                    Ok(m) => (true, m),
-                    Err(e) => (false, IpcError::from(e).message),
+                let (ok, message, reason) = match result {
+                    Ok(m) => (true, m, None),
+                    Err(e) => {
+                        let reason = failure_reason(&e);
+                        (false, IpcError::from(e).message, Some(reason))
+                    }
                 };
                 let method = unsubscribe::best_automatic(&sub).cloned();
                 let sub_id = *id;
@@ -117,8 +185,8 @@ pub fn unsubscribe_job(
                 } else {
                     failed_n += 1;
                 }
-                ctx.item(done, total, id.to_string(), ok, message.clone());
-                results.push(json!({ "id": id, "ok": ok, "skipped": false, "message": message }));
+                ctx.item_reason(done, total, id.to_string(), ok, message.clone(), reason);
+                results.push(json!({ "id": id, "ok": ok, "skipped": false, "message": message, "reason": reason }));
             }
         }
     }
@@ -158,6 +226,7 @@ mod tests {
             status: SubscriptionStatus::Active,
             history: vec![],
             post_unsubscribe_mails: vec![],
+            last_message_id: None,
         }
     }
 
@@ -242,6 +311,10 @@ mod tests {
         assert_eq!(done["payload"]["ok"], 1);
         assert_eq!(done["payload"]["failed"], 1);
         assert_eq!(done["payload"]["skipped"], 3);
+        let res = done["payload"]["results"].as_array().unwrap();
+        assert!(res.iter().any(|r| r["reason"] == "Http"));
+        assert!(res.iter().any(|r| r["reason"] == "Refused"));
+        assert!(res.iter().any(|r| r["reason"] == "NoAutomaticMethod"));
         assert_eq!(*calls.lock().unwrap(), vec!["auto", "fail"]);
         f.state
             .read(|d| {
@@ -262,5 +335,92 @@ mod tests {
     fn empty_selection_is_invalid() {
         let f = unlocked();
         assert!(start_unsubscribe(&f.state, vec![], real_unsubscriber()).is_err());
+    }
+
+    #[test]
+    fn manual_links_header_and_mail_on_request() {
+        let f = unlocked();
+        let mb = MailboxConfig {
+            id: Uuid::new_v4(),
+            address: "me@example.org".into(),
+            imap_host: "h".into(),
+            imap_port: 993,
+            username: "u".into(),
+            password: "p".into(),
+            folders: vec![],
+            progress: vec![],
+            last_scan: None,
+        };
+        let s = sub(
+            "me@example.org",
+            "list",
+            MailCategory::Marketing,
+            vec![
+                UnsubscribeMethod::OneClick {
+                    url: "https://x.example/u".into(),
+                },
+                UnsubscribeMethod::Mailto {
+                    address: "u@x.example".into(),
+                    subject: None,
+                    body: None,
+                },
+            ],
+        );
+        let id = s.id;
+        f.state
+            .mutate(|d| {
+                d.mailboxes.push(mb);
+                d.subscriptions.push(s);
+            })
+            .unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let calls: &'static _ = Box::leak(Box::new(calls));
+        let fetch: &'static LinkFetcher =
+            Box::leak(Box::new(move |_: &MailboxConfig, _: &Subscription| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(vec![
+                    ManualLink {
+                        url: "https://x.example/u".into(),
+                        source: manual::LinkSource::Mail,
+                        label: "dup".into(),
+                    },
+                    ManualLink {
+                        url: "https://x.example/m".into(),
+                        source: manual::LinkSource::Mail,
+                        label: "Abmelden".into(),
+                    },
+                ])
+            }));
+        let v = manual_links(&f.state, id, false, fetch).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(v["links"].as_array().unwrap().len(), 1);
+        assert_eq!(v["links"][0]["source"], "header");
+        assert_eq!(v["mailto"], "u@x.example");
+        let v = manual_links(&f.state, id, true, fetch).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let links = v["links"].as_array().unwrap();
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[1]["source"], "mail");
+        assert_eq!(links[1]["url"], "https://x.example/m");
+        assert!(manual_links(&f.state, Uuid::new_v4(), false, fetch).is_err());
+    }
+
+    #[test]
+    fn failure_reasons_are_machine_readable() {
+        assert_eq!(failure_reason(&UnsubscribeError::Http(500)), "Http");
+        assert_eq!(
+            failure_reason(&UnsubscribeError::Network("x".into())),
+            "Network"
+        );
+        assert_eq!(
+            failure_reason(&UnsubscribeError::UnsafeTarget),
+            "UnsafeTarget"
+        );
+        assert_eq!(failure_reason(&UnsubscribeError::Smtp("x".into())), "Smtp");
+        assert_eq!(failure_reason(&UnsubscribeError::Refused), "Refused");
+        assert_eq!(
+            failure_reason(&UnsubscribeError::NoAutomaticMethod),
+            "NoAutomaticMethod"
+        );
     }
 }

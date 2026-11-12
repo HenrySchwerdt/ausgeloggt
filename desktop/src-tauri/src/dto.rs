@@ -64,6 +64,7 @@ pub fn snapshot(data: &VaultData) -> IpcResult<Value> {
         "settings": settings_dto(&data.settings)?,
         "subscriptions": to_value(&data.subscriptions)?,
         "requests": to_value(&data.requests)?,
+        "automations": to_value(&data.automations)?,
     }))
 }
 

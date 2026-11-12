@@ -109,6 +109,9 @@ pub async fn request_create(
         subject,
         body,
         sent,
+        message_id: None,
+        mailbox_id: None,
+        attachment: None,
     };
     state.try_mutate(|d| letters::create_request(d, req, Utc::now()))
 }

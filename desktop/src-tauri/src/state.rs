@@ -50,6 +50,20 @@ pub struct SaveSignal {
     debounce: Duration,
 }
 
+/// What the shell needs to know about automations without opening the vault (it may be
+/// locked): updated whenever the data is read or changed while unlocked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AutomationHint {
+    /// At least one rule is enabled.
+    pub armed: bool,
+    /// Desktop notifications are on.
+    pub notify: bool,
+    /// Closing the window hides to the tray (automations enabled or tray mode chosen).
+    pub hide_on_close: bool,
+    /// The "paused, vault locked" notice was shown for this lock period.
+    pub paused_notified: bool,
+}
+
 pub struct JobEntry {
     pub kind: String,
     pub cancel: Arc<AtomicBool>,
@@ -67,6 +81,7 @@ pub struct Inner {
     catalog: Mutex<Option<Arc<Catalog>>>,
     pub(crate) notified: Mutex<HashSet<String>>,
     pub(crate) rescan_attempts: Mutex<HashMap<Uuid, DateTime<Utc>>>,
+    pub(crate) automation_hint: Mutex<AutomationHint>,
     custom_path: Mutex<Option<PathBuf>>,
     default_path: PathBuf,
     fast_kdf: bool,
@@ -115,6 +130,7 @@ impl AppState {
             catalog: Mutex::new(None),
             notified: Mutex::new(HashSet::new()),
             rescan_attempts: Mutex::new(HashMap::new()),
+            automation_hint: Mutex::new(AutomationHint::default()),
             custom_path: Mutex::new(None),
             default_path,
             fast_kdf,
@@ -206,6 +222,8 @@ impl AppState {
     fn install(&self, vault: Vault) {
         *self.catalog.lock_safe() = None;
         *self.vault.lock_safe() = Some(vault);
+        self.automation_hint.lock_safe().paused_notified = false;
+        self.refresh_hint();
         self.touch();
         self.signal.flags.lock_safe().dirty = false;
         self.revision.fetch_add(1, Ordering::SeqCst);
@@ -320,10 +338,32 @@ impl AppState {
     }
 
     fn after_mutation(&self) {
+        self.refresh_hint();
         self.touch();
         self.mark_dirty();
         let rev = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
         self.emit("vault://changed", json!({ "revision": rev }));
+    }
+
+    /// Refresh the cached automation / tray flags from the unlocked data.
+    pub fn refresh_hint(&self) {
+        let Ok((armed, notify, tray)) = self.read(|d| {
+            (
+                d.automations.iter().any(|a| a.enabled),
+                d.settings.notifications,
+                d.settings.start_minimized_to_tray,
+            )
+        }) else {
+            return;
+        };
+        let mut h = self.automation_hint.lock_safe();
+        h.armed = armed;
+        h.notify = notify;
+        h.hide_on_close = armed || tray;
+    }
+
+    pub fn hint(&self) -> AutomationHint {
+        *self.automation_hint.lock_safe()
     }
 
     // ---- catalog ----------------------------------------------------------------
@@ -361,6 +401,15 @@ impl AppState {
             Err(_) => return false,
         };
         if minutes == 0 || self.has_running_jobs() {
+            return false;
+        }
+        // Opt in (with a warning in the UI): stay unlocked while automations are enabled.
+        let keep = self
+            .read(|d| {
+                d.settings.keep_unlocked_for_automation && d.automations.iter().any(|a| a.enabled)
+            })
+            .unwrap_or(false);
+        if keep {
             return false;
         }
         let idle = now.saturating_duration_since(*self.activity.lock_safe());

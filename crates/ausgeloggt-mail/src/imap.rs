@@ -580,12 +580,103 @@ impl Client {
         Ok(uids)
     }
 
+    /// UIDs of mails whose `Message-ID` header equals `id` (ascending).
+    pub fn search_message_id(&mut self, id: &str) -> Result<Vec<u32>, MailError> {
+        let reply = self.command(&format!("UID SEARCH HEADER Message-ID {}", quote(id)))?;
+        if !reply.ok {
+            return Err(MailError::Imap("Suche im Ordner fehlgeschlagen".into()));
+        }
+        let mut uids = Vec::new();
+        for u in &reply.untagged {
+            let t = u.text();
+            if let Some(rest) = t.strip_prefix("* ") {
+                if rest
+                    .get(..6)
+                    .is_some_and(|p| p.eq_ignore_ascii_case("SEARCH"))
+                {
+                    uids.extend(
+                        rest[6..]
+                            .split_whitespace()
+                            .filter_map(|n| n.parse::<u32>().ok()),
+                    );
+                }
+            }
+        }
+        uids.sort_unstable();
+        uids.dedup();
+        Ok(uids)
+    }
+
     pub fn uid_fetch(&mut self, set: &str, items: &str) -> Result<Vec<FetchItem>, MailError> {
         let reply = self.command(&format!("UID FETCH {set} {items}"))?;
         if !reply.ok {
             return Err(MailError::Imap("Abruf der Mails fehlgeschlagen".into()));
         }
         Ok(reply.untagged.iter().filter_map(parse_fetch).collect())
+    }
+
+    /// `APPEND` a message to `folder` (synchronous literal). Used to keep a copy of sent
+    /// mail. The message is never logged.
+    pub fn append(&mut self, folder: &str, flags: &str, message: &[u8]) -> Result<(), MailError> {
+        if message.len() > MAX_LITERAL {
+            return Err(MailError::Imap("Nachricht zu groß zum Ablegen".into()));
+        }
+        self.tag += 1;
+        let tag = format!("S{:04}", self.tag);
+        let io = self.rd.get_mut();
+        io.write_all(
+            format!(
+                "{tag} APPEND {} ({flags}) {{{}}}\r\n",
+                quote(folder),
+                message.len()
+            )
+            .as_bytes(),
+        )
+        .map_err(|e| io_err(&e))?;
+        io.flush().map_err(|e| io_err(&e))?;
+        let tag_prefix = format!("{tag} ");
+        // Wait for the continuation request ("+"); a tagged answer here is a refusal.
+        loop {
+            let chunks = self.read_logical()?;
+            let first = chunks.first().map(chunk_text).unwrap_or_default();
+            if first.starts_with('+') {
+                break;
+            }
+            if first.starts_with(&tag_prefix) {
+                return Err(MailError::Imap(
+                    "Der Server hat das Ablegen im Ordner abgelehnt".into(),
+                ));
+            }
+            if first
+                .strip_prefix("* ")
+                .is_some_and(|r| r.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("BYE")))
+            {
+                return Err(MailError::Imap(
+                    "Der Server hat die Verbindung beendet".into(),
+                ));
+            }
+        }
+        let io = self.rd.get_mut();
+        io.write_all(message).map_err(|e| io_err(&e))?;
+        io.write_all(b"\r\n").map_err(|e| io_err(&e))?;
+        io.flush().map_err(|e| io_err(&e))?;
+        loop {
+            let chunks = self.read_logical()?;
+            let first = chunks.first().map(chunk_text).unwrap_or_default();
+            if let Some(rest) = first.strip_prefix(&tag_prefix) {
+                let ok = rest
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|w| w.eq_ignore_ascii_case("OK"));
+                return if ok {
+                    Ok(())
+                } else {
+                    Err(MailError::Imap(
+                        "Der Server hat das Ablegen im Ordner abgelehnt".into(),
+                    ))
+                };
+            }
+        }
     }
 
     pub fn logout(&mut self) {

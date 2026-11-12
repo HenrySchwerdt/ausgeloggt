@@ -10,6 +10,7 @@
 // Tauri commands mirror the flat argument lists of docs/IPC.md.
 #![allow(clippy::too_many_arguments)]
 
+pub mod automation;
 pub mod commands;
 pub mod dto;
 pub mod error;
@@ -18,8 +19,10 @@ pub mod jobs;
 pub mod letters;
 pub mod logos;
 pub mod ops;
+pub mod ratelimit;
 pub mod schedule;
 pub mod state;
+pub mod tray;
 pub mod work;
 
 use std::sync::Arc;
@@ -37,19 +40,40 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(state.clone())
         .setup({
             let state = state.clone();
             move |app| {
                 host.attach(app.handle().clone());
                 schedule::spawn(state.clone());
+                automation::spawn(state.clone());
+                tray::build(app, state.clone())?;
+                if std::env::args().any(|a| a == "--minimized") {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.hide();
+                    }
+                }
                 Ok(())
             }
         })
         .on_window_event(|window, event| {
             // Never lose a pending change when the window goes away.
-            if let WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed = event {
-                window.app_handle().state::<AppState>().flush();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let state = window.app_handle().state::<AppState>();
+                    state.flush();
+                    // With automations (or tray mode) the app keeps running in the tray.
+                    if state.hint().hide_on_close {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                WindowEvent::Destroyed => window.app_handle().state::<AppState>().flush(),
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -83,6 +107,7 @@ pub fn run() {
             commands::newsletters::subscription_set_status,
             commands::newsletters::subscription_set_category,
             commands::newsletters::unsubscribe_start,
+            commands::newsletters::unsubscribe_manual_links,
             commands::newsletters::ai_classify_start,
             commands::security::breach_check_start,
             commands::letters::letter_preview,
@@ -91,6 +116,15 @@ pub fn run() {
             commands::letters::request_update,
             commands::letters::request_remove,
             commands::letters::mailto_url,
+            commands::send::letter_send,
+            commands::send::letters_send_bulk,
+            commands::send::letters_send_check,
+            commands::send::account_set_queued,
+            commands::send::automation_list,
+            commands::send::automation_upsert,
+            commands::send::automation_remove,
+            commands::send::automation_run_now,
+            commands::send::autostart_set,
             commands::settings::settings_update,
             commands::settings::secret_set,
             commands::settings::ai_test,

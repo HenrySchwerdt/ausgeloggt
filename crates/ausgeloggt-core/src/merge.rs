@@ -390,6 +390,7 @@ pub fn merge_subscriptions(
                     status: SubscriptionStatus::Active,
                     history: Vec::new(),
                     post_unsubscribe_mails: Vec::new(),
+                    last_message_id: obs.last_message_id,
                 };
                 sub.frequency_per_month =
                     frequency(sub.message_count, sub.first_seen, sub.last_seen);
@@ -411,6 +412,16 @@ pub fn merge_subscriptions(
                     sub.message_count = obs.message_count;
                 } else {
                     sub.message_count += obs.message_count;
+                }
+                if obs.last_message_id.is_some() {
+                    let newer = match (obs.last_seen, sub.last_seen) {
+                        (Some(o), Some(s)) => o >= s,
+                        (Some(_), None) => true,
+                        (None, _) => sub.last_message_id.is_none(),
+                    };
+                    if newer {
+                        sub.last_message_id = obs.last_message_id.clone();
+                    }
                 }
                 sub.first_seen = min_opt(sub.first_seen, obs.first_seen);
                 sub.last_seen = max_opt(sub.last_seen, obs.last_seen);
@@ -1028,6 +1039,7 @@ mod tests {
             sample_subjects: subjects.iter().map(|s| s.to_string()).collect(),
             category: MailCategory::Marketing,
             watched_mails: Vec::new(),
+            last_message_id: None,
         }
     }
 

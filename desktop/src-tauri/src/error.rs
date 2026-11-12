@@ -82,7 +82,8 @@ impl From<ausgeloggt_mail::MailError> for IpcError {
         use ausgeloggt_mail::MailError as M;
         let code = match &e {
             M::Auth => ErrorCode::Auth,
-            M::Connect(..) | M::Imap(_) => ErrorCode::Network,
+            M::Connect(..) | M::Imap(_) | M::Smtp(_) => ErrorCode::Network,
+            M::Invalid(_) => ErrorCode::Invalid,
             M::Cancelled => ErrorCode::Internal,
         };
         Self::new(code, e.to_string())

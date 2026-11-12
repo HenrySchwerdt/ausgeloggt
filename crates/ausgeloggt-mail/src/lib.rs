@@ -6,7 +6,9 @@
 
 pub mod classify;
 mod imap;
+pub mod manual;
 pub mod receipts;
+pub mod send;
 pub mod unsubscribe;
 
 use std::collections::{HashMap, HashSet};
@@ -31,6 +33,10 @@ pub enum MailError {
     Auth,
     #[error("IMAP-Fehler: {0}")]
     Imap(String),
+    #[error("Mailversand fehlgeschlagen: {0}")]
+    Smtp(String),
+    #[error("{0}")]
+    Invalid(String),
     #[error("Abgebrochen")]
     Cancelled,
 }
@@ -450,6 +456,7 @@ struct SubAgg {
     subjects: Vec<(Option<DateTime<Utc>>, String)>,
     categories: HashMap<MailCategory, u32>,
     watched: Vec<MailRef>,
+    last_message_id: Option<String>,
 }
 
 /// Max watched mails (evidence) kept per list and scan.
@@ -482,6 +489,7 @@ impl SubAgg {
             sample_subjects,
             category,
             watched_mails: watched,
+            last_message_id: self.last_message_id,
         }
     }
 }
@@ -814,6 +822,7 @@ impl ScanState {
             subjects: Vec::new(),
             categories: HashMap::new(),
             watched: Vec::new(),
+            last_message_id: None,
         });
         let newest = match (h.date, agg.last) {
             (Some(d), Some(l)) => d >= l,
@@ -829,6 +838,14 @@ impl ScanState {
             agg.sender = addr;
             agg.sender_name = name.or_else(|| agg.sender_name.take());
             agg.domain = domain;
+            if let Some(id) = h
+                .message_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                agg.last_message_id = Some(id.to_string());
+            }
         }
         if !methods.is_empty() {
             let newer_methods = match (h.date, agg.unsubscribe_date) {

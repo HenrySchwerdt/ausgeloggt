@@ -8,6 +8,7 @@ pub mod letters;
 pub mod mail;
 pub mod newsletters;
 pub mod security;
+pub mod send;
 pub mod settings;
 pub mod vault;
 

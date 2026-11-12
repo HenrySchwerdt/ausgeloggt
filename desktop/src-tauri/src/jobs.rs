@@ -106,6 +106,21 @@ impl JobCtx {
         self.emit_progress(done, total, message, Some(item));
     }
 
+    /// Like [`item`](Self::item) with a machine readable failure `reason`.
+    pub fn item_reason(
+        &self,
+        done: u64,
+        total: u64,
+        id: impl Into<String>,
+        ok: bool,
+        message: impl Into<String>,
+        reason: Option<&str>,
+    ) {
+        let message = message.into();
+        let item = json!({ "id": id.into(), "ok": ok, "message": message, "reason": reason });
+        self.emit_progress(done, total, message, Some(item));
+    }
+
     fn emit_progress(&self, done: u64, total: u64, message: String, item: Option<Value>) {
         if let Some(e) = self.state.jobs.lock_safe().get_mut(&self.id) {
             e.done = done;
@@ -138,7 +153,8 @@ impl AppState {
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut jobs = self.jobs.lock_safe();
-            if jobs.values().any(|j| j.kind == kind) {
+            let group = exclusion_group(kind);
+            if jobs.values().any(|j| exclusion_group(&j.kind) == group) {
                 return Err(IpcError::busy("Dieser Vorgang läuft bereits"));
             }
             jobs.insert(
@@ -209,6 +225,15 @@ impl AppState {
             .iter()
             .map(|(id, j)| json!({ "jobId": id, "kind": j.kind, "done": j.done, "total": j.total }))
             .collect()
+    }
+}
+
+/// Jobs of one group never run at the same time. Everything that can send mail shares
+/// the group `send`, so two jobs can never contact the same account twice.
+fn exclusion_group(kind: &str) -> &str {
+    match kind {
+        "automation" => "send",
+        other => other,
     }
 }
 

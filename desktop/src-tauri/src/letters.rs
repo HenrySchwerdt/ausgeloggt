@@ -463,6 +463,12 @@ pub struct NewRequest {
     pub subject: String,
     pub body: String,
     pub sent: bool,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub mailbox_id: Option<Uuid>,
+    #[serde(default)]
+    pub attachment: Option<String>,
 }
 
 pub fn create_request(
@@ -511,6 +517,9 @@ pub fn create_request(
         deadline: sent_at.and_then(|s| deadline_for(req.kind, s)),
         status,
         notes: String::new(),
+        message_id: req.message_id,
+        mailbox_id: req.mailbox_id,
+        attachment: req.attachment,
     });
     Ok(id)
 }
@@ -604,6 +613,9 @@ mod tests {
             deadline: Some(gdpr::deadline_from(now())),
             status: RequestStatus::Sent,
             notes: String::new(),
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         }
     }
 
@@ -776,6 +788,7 @@ mod tests {
             status: SubscriptionStatus::StillReceiving,
             history: vec![],
             post_unsubscribe_mails: vec![],
+            last_message_id: None,
         });
         let mut a = args(LetterKind::CeaseAndDesist);
         a.subscription_id = Some(d.subscriptions[0].id);
@@ -823,6 +836,9 @@ mod tests {
             subject: "Löschung".into(),
             body: "Text".into(),
             sent,
+            message_id: None,
+            mailbox_id: None,
+            attachment: None,
         }
     }
 

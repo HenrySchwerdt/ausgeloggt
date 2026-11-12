@@ -133,6 +133,7 @@ fn subscription(mails: Vec<MailRef>) -> Subscription {
             message: "HTTP 200".into(),
         }],
         post_unsubscribe_mails: mails,
+        last_message_id: None,
     }
 }
 
@@ -154,6 +155,9 @@ fn request(kind: RequestKind) -> DataRequest {
         deadline: Some(Utc.with_ymd_and_hms(2026, 10, 2, 9, 0, 0).unwrap()),
         status: RequestStatus::Sent,
         notes: String::new(),
+        message_id: None,
+        mailbox_id: None,
+        attachment: None,
     }
 }
 
