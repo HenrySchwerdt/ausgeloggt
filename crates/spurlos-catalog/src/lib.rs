@@ -5,6 +5,7 @@
 //! bundled data are listed in `data/ATTRIBUTION.md`.
 
 pub mod gdpr;
+pub mod orgs;
 
 use std::collections::HashMap;
 use std::path::Path;

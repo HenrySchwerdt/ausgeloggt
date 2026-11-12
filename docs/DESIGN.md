@@ -1,6 +1,6 @@
 # Spurlos – Design-Spezifikation
 
-Vorbild: T3 Code, Linear, Vercel, shadcn/ui ("zinc"). **Ruhig, flach, monochrom, präzise.**
+Vorbild: T3 Code, Linear, Vercel, shadcn/ui ("zinc"). Umsetzung mit Tailwind v4 + shadcn/ui: die Tokens unten sind CSS-Variablen. **Ruhig, flach, monochrom, präzise.**
 Farbe ist Information, keine Dekoration. Im Zweifel: weniger Rahmen, weniger Farbe, mehr Weißraum.
 
 ## Tokens

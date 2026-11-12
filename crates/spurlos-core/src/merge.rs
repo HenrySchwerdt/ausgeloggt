@@ -134,6 +134,8 @@ pub fn merge_findings(data: &mut VaultData, findings: Vec<Finding>) -> MergeRepo
                     deletion: Vec::new(),
                     created_at: now,
                     updated_at: now,
+                    payments: Vec::new(),
+                    security: Default::default(),
                 });
                 by_domain.insert(key.clone(), i);
                 by_name.entry(name.trim().to_lowercase()).or_insert(i);
@@ -300,6 +302,7 @@ pub fn merge_subscriptions(
                     category_source: CategorySource::Rules,
                     status: SubscriptionStatus::Active,
                     history: Vec::new(),
+                    post_unsubscribe_mails: Vec::new(),
                 };
                 sub.frequency_per_month =
                     frequency(sub.message_count, sub.first_seen, sub.last_seen);
@@ -401,6 +404,53 @@ fn frequency(count: u64, first: Option<DateTime<Utc>>, last: Option<DateTime<Utc
     }
     let span_days = ((l - f).num_seconds() as f64 / 86_400.0).max(1.0);
     (((count - 1) as f64 / span_days) * 30.0) as f32
+}
+
+/// Fold payment observations into `Account.payments`:
+/// - resolve the account like `merge_findings` does (canonical domain / `unresolved:` by name);
+///   create the account if missing (with a `Payment` evidence entry, so it shows up)
+/// - dedupe by `record.source_ref` (fallback: date + amount + summary)
+/// - union identifier
+/// Returns (records added, accounts created).
+pub fn merge_payments(
+    data: &mut VaultData,
+    observations: Vec<crate::model::PaymentObservation>,
+) -> (u64, u64) {
+    let _ = (data, observations);
+    todo!("implemented by core agent")
+}
+
+/// Apply security observations (password audit) to matching accounts by canonical
+/// domain (+ identifier when given). Values from a newer import overwrite older ones;
+/// `None` fields don't overwrite. Sets `security.checked_at`. Returns accounts updated.
+pub fn merge_security(
+    data: &mut VaultData,
+    observations: Vec<crate::model::SecurityObservation>,
+) -> u64 {
+    let _ = (data, observations);
+    todo!("implemented by core agent")
+}
+
+/// Attach domain-level breaches (`(breach_domain, record)`, e.g. from the public HIBP
+/// breach list) to accounts with that canonical domain, and identifier-level hits
+/// (`confirmed_for_user = true`). Dedup by breach name. Returns accounts updated.
+pub fn merge_breaches(
+    data: &mut VaultData,
+    breaches: Vec<(String, crate::model::BreachRecord)>,
+) -> u64 {
+    let _ = (data, breaches);
+    todo!("implemented by core agent")
+}
+
+/// For subscriptions that are `Unsubscribed` / `StillReceiving`: add observation
+/// `watched_mails` dated after the last successful unsubscribe attempt + 2 days grace
+/// to `post_unsubscribe_mails` (dedup by Message-ID). Called from `merge_subscriptions`.
+pub fn record_post_unsubscribe_mails(
+    sub: &mut crate::model::Subscription,
+    mails: &[crate::model::MailRef],
+) -> usize {
+    let _ = (sub, mails);
+    todo!("implemented by core agent")
 }
 
 /// Confidence from evidence: `1 - Π(1 - weight)` over the *distinct* evidence kinds.
@@ -676,6 +726,7 @@ mod tests {
             last_seen: Some(day(last)),
             sample_subjects: subjects.iter().map(|s| s.to_string()).collect(),
             category: MailCategory::Marketing,
+            watched_mails: Vec::new(),
         }
     }
 

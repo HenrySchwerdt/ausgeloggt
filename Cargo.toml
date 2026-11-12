@@ -6,6 +6,9 @@ members = [
     "crates/spurlos-mail",
     "crates/spurlos-catalog",
     "crates/spurlos-ai",
+    "crates/spurlos-breach",
+    "crates/spurlos-letters",
+    "desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -20,6 +23,8 @@ spurlos-import = { path = "crates/spurlos-import" }
 spurlos-mail = { path = "crates/spurlos-mail" }
 spurlos-catalog = { path = "crates/spurlos-catalog" }
 spurlos-ai = { path = "crates/spurlos-ai" }
+spurlos-breach = { path = "crates/spurlos-breach" }
+spurlos-letters = { path = "crates/spurlos-letters" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }

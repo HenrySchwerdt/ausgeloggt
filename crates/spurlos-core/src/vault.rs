@@ -386,6 +386,8 @@ mod tests {
             deletion: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            payments: Vec::new(),
+            security: Default::default(),
         }
     }
 

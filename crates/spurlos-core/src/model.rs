@@ -24,6 +24,10 @@ pub struct VaultData {
     /// Newsletters / mailing lists per mailbox (the "unsubscribe" feature).
     #[serde(default)]
     pub subscriptions: Vec<Subscription>,
+    /// All letters / requests sent to companies and authorities (erasure, access,
+    /// objection, cancellation, cease-and-desist, complaints) with deadlines.
+    #[serde(default)]
+    pub requests: Vec<DataRequest>,
 }
 
 /// A newsletter / mailing list sending to one of the user's mailboxes.
@@ -59,6 +63,23 @@ pub struct Subscription {
     pub status: SubscriptionStatus,
     #[serde(default)]
     pub history: Vec<UnsubscribeAttempt>,
+    /// Mails received after the last successful unsubscribe (+ grace period): the proof
+    /// for objections / cease-and-desist letters. Deduplicated by Message-ID.
+    #[serde(default)]
+    pub post_unsubscribe_mails: Vec<MailRef>,
+}
+
+/// Reference to one received mail, kept as evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailRef {
+    pub date: Option<DateTime<Utc>>,
+    pub from: String,
+    pub subject: String,
+    pub message_id: Option<String>,
+    /// The fetched header block as received (From, To, Date, Subject, Message-ID,
+    /// List-*, Received chain if fetched). Never the body.
+    #[serde(default)]
+    pub raw_headers: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +183,9 @@ pub struct SubscriptionObservation {
     pub sample_subjects: Vec<String>,
     /// Rule-based guess.
     pub category: MailCategory,
+    /// Mails of lists the scan was asked to watch (unsubscribed lists), as evidence.
+    #[serde(default)]
+    pub watched_mails: Vec<MailRef>,
 }
 
 /// One online account at one service.
@@ -195,6 +219,38 @@ pub struct Account {
     pub deletion: Vec<DeletionStep>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Payments / receipts / renewals seen for this account (dedup by source_ref).
+    #[serde(default)]
+    pub payments: Vec<PaymentRecord>,
+    #[serde(default)]
+    pub security: SecurityInfo,
+}
+
+impl Account {
+    /// A fresh, empty account. Use this instead of a struct literal so new fields
+    /// never break callers.
+    pub fn new(domain: impl Into<String>, name: impl Into<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            domain: domain.into(),
+            name: name.into(),
+            identifiers: Vec::new(),
+            sso: Vec::new(),
+            evidence: Vec::new(),
+            status: AccountStatus::Discovered,
+            confidence: 0.0,
+            first_seen: None,
+            last_seen: None,
+            tags: Vec::new(),
+            notes: String::new(),
+            deletion: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            payments: Vec::new(),
+            security: SecurityInfo::default(),
+        }
+    }
 }
 
 /// One piece of evidence that an account exists.
@@ -235,10 +291,16 @@ pub enum EvidenceKind {
     OtherMail,
     /// Added by hand.
     Manual,
+    /// A charge / renewal / payment confirmation (a paid account; strong evidence).
+    Payment,
+    /// A 2FA / one-time-code mail or a TOTP secret in a password export.
+    TwoFactor,
+    /// Recognised in a screenshot of an SSO / connected-apps list.
+    Screenshot,
 }
 
 impl EvidenceKind {
-    pub const ALL: [EvidenceKind; 12] = [
+    pub const ALL: [EvidenceKind; 15] = [
         EvidenceKind::Welcome,
         EvidenceKind::Verification,
         EvidenceKind::PasswordReset,
@@ -251,12 +313,18 @@ impl EvidenceKind {
         EvidenceKind::Newsletter,
         EvidenceKind::OtherMail,
         EvidenceKind::Manual,
+        EvidenceKind::Payment,
+        EvidenceKind::TwoFactor,
+        EvidenceKind::Screenshot,
     ];
 
     /// How strongly this kind of evidence indicates a real account (0..=1).
     pub fn weight(self) -> f32 {
         match self {
             EvidenceKind::Manual => 1.0,
+            EvidenceKind::Payment => 0.9,
+            EvidenceKind::TwoFactor => 0.9,
+            EvidenceKind::Screenshot => 0.9,
             EvidenceKind::SavedPassword => 0.95,
             EvidenceKind::SsoGrant => 0.95,
             EvidenceKind::Welcome => 0.9,
@@ -285,6 +353,9 @@ impl EvidenceKind {
             EvidenceKind::Newsletter => "Newsletter",
             EvidenceKind::OtherMail => "Sonstige Mail",
             EvidenceKind::Manual => "Manuell",
+            EvidenceKind::Payment => "Zahlung",
+            EvidenceKind::TwoFactor => "Zwei-Faktor-Code",
+            EvidenceKind::Screenshot => "Screenshot",
         }
     }
 }
@@ -306,6 +377,8 @@ pub enum SourceKind {
     GitHub,
     HaveIBeenPwned,
     Manual,
+    /// Screenshot of an SSO / connected-apps list, read by a (local) vision model.
+    Screenshot { provider: Option<SsoProvider> },
 }
 
 impl SourceKind {
@@ -319,6 +392,10 @@ impl SourceKind {
             SourceKind::GitHub => "GitHub".into(),
             SourceKind::HaveIBeenPwned => "Have I Been Pwned".into(),
             SourceKind::Manual => "Manuell".into(),
+            SourceKind::Screenshot { provider } => match provider {
+                Some(p) => format!("Screenshot ({})", p.label()),
+                None => "Screenshot".into(),
+            },
         }
     }
 }
@@ -540,6 +617,20 @@ pub struct Settings {
     /// Fetch missing logos directly from the service's own domain (never via third-party
     /// favicon services). Bundled offline logos are always used.
     pub fetch_logos: bool,
+    /// Postal identity for letters (cease-and-desist, credit bureau requests ...).
+    pub identity: Identity,
+    /// Check imported passwords against HIBP Pwned Passwords (k-anonymity: only the
+    /// first 5 hex chars of the SHA-1 leave the machine). Asked before first use.
+    pub check_pwned_passwords: bool,
+    /// Optional HIBP API key for per-address breach lookups (stored only in the vault).
+    pub hibp_api_key: String,
+    /// Read the body of receipt / renewal mails to extract amount, plan and payment
+    /// method (card brand + last 4 only). Opt-in.
+    pub read_receipt_bodies: bool,
+    /// Rescan mailboxes automatically every N days while the app runs (0 = off).
+    pub auto_rescan_days: u32,
+    /// Desktop notifications for deadlines, new accounts, breaches, renewals.
+    pub notifications: bool,
 }
 
 impl Default for Settings {
@@ -553,6 +644,12 @@ impl Default for Settings {
             dark_mode: true,
             ai: AiSettings::default(),
             fetch_logos: true,
+            identity: Identity::default(),
+            check_pwned_passwords: false,
+            hibp_api_key: String::new(),
+            read_receipt_bodies: false,
+            auto_rescan_days: 7,
+            notifications: true,
         }
     }
 }
@@ -591,4 +688,275 @@ pub enum AiProvider {
     Ollama,
     /// Anthropic API: sends sender + subjects (never bodies) to Anthropic. Opt-in.
     Anthropic,
+}
+
+// ---------------------------------------------------------------------------
+// Wave 2: identity, payments, security, requests
+// ---------------------------------------------------------------------------
+
+/// The user's postal identity, used only to fill letters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Identity {
+    pub street: String,
+    pub postal_code: String,
+    pub city: String,
+    pub country: String,
+    /// ISO 3166-2 code of the German state, e.g. `DE-BY`, for the competent
+    /// data-protection authority. Empty = derive from postal code / ask.
+    pub state: String,
+    /// `YYYY-MM-DD`; only needed for credit-bureau self-disclosure requests.
+    pub birth_date: String,
+    /// Previous addresses (credit bureaus ask for addresses of the last 5 years).
+    pub previous_addresses: Vec<String>,
+    pub phone: String,
+    /// Reply e-mail for letters; empty = first configured mailbox.
+    pub email: String,
+}
+
+impl Default for Identity {
+    fn default() -> Self {
+        Self {
+            street: String::new(),
+            postal_code: String::new(),
+            city: String::new(),
+            country: "Deutschland".into(),
+            state: String::new(),
+            birth_date: String::new(),
+            previous_addresses: Vec::new(),
+            phone: String::new(),
+            email: String::new(),
+        }
+    }
+}
+
+/// One payment-related event for an account.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaymentRecord {
+    pub date: Option<DateTime<Utc>>,
+    pub kind: PaymentKind,
+    /// Amount in minor units (cents). Negative for refunds.
+    pub amount_minor: Option<i64>,
+    /// ISO 4217, e.g. `EUR`.
+    pub currency: Option<String>,
+    /// Plan / product, e.g. "Premium Family".
+    pub plan: Option<String>,
+    pub method: Option<PaymentMethod>,
+    /// Aggregator that billed it, e.g. `apple.com`, `google.com`, `paypal.com`.
+    pub via: Option<String>,
+    /// Human readable, e.g. the mail subject or receipt line.
+    pub summary: String,
+    /// Dedup key: Message-ID (+ line index for aggregator receipts).
+    pub source_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PaymentKind {
+    /// One-off charge / order / invoice.
+    Charge,
+    /// Subscription renewal / recurring charge.
+    Renewal,
+    TrialStarted,
+    /// "Your price will change" notice.
+    PriceChange,
+    Refund,
+    /// Subscription cancelled confirmation.
+    Cancelled,
+    PaymentFailed,
+}
+
+impl PaymentKind {
+    pub fn label_de(self) -> &'static str {
+        match self {
+            PaymentKind::Charge => "Zahlung",
+            PaymentKind::Renewal => "Abo-Verlängerung",
+            PaymentKind::TrialStarted => "Testphase",
+            PaymentKind::PriceChange => "Preisänderung",
+            PaymentKind::Refund => "Erstattung",
+            PaymentKind::Cancelled => "Gekündigt",
+            PaymentKind::PaymentFailed => "Zahlung fehlgeschlagen",
+        }
+    }
+}
+
+/// How something was paid. Never more than brand + last 4 digits of a card / IBAN.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PaymentMethod {
+    /// `brand`: Visa, Mastercard, Amex, Maestro, ...; `last4`: exactly 4 digits.
+    Card { brand: String, last4: String },
+    PayPal,
+    Sepa { iban_last4: Option<String> },
+    ApplePay,
+    GooglePay,
+    AmazonPay,
+    Klarna,
+    Invoice,
+    Other(String),
+}
+
+impl PaymentMethod {
+    pub fn label_de(&self) -> String {
+        match self {
+            PaymentMethod::Card { brand, last4 } => format!("{brand} •••• {last4}"),
+            PaymentMethod::PayPal => "PayPal".into(),
+            PaymentMethod::Sepa { iban_last4: Some(l) } => format!("Lastschrift •••• {l}"),
+            PaymentMethod::Sepa { iban_last4: None } => "Lastschrift".into(),
+            PaymentMethod::ApplePay => "Apple Pay".into(),
+            PaymentMethod::GooglePay => "Google Pay".into(),
+            PaymentMethod::AmazonPay => "Amazon Pay".into(),
+            PaymentMethod::Klarna => "Klarna".into(),
+            PaymentMethod::Invoice => "Rechnung".into(),
+            PaymentMethod::Other(s) => s.clone(),
+        }
+    }
+}
+
+/// Emitted by the mail scan; merged into `Account.payments` by
+/// [`crate::merge::merge_payments`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaymentObservation {
+    /// Merchant domain (any form; for aggregator line items the app's domain or
+    /// `unresolved:<slug>`).
+    pub domain: String,
+    pub name: Option<String>,
+    pub identifier: Option<String>,
+    pub source: SourceKind,
+    pub record: PaymentRecord,
+}
+
+/// Security facts about one account.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecurityInfo {
+    /// How many *other* accounts share this account's password (from the last
+    /// password import). `None` = unknown.
+    pub password_reuse_count: Option<u32>,
+    /// Password found in HIBP Pwned Passwords. `None` = not checked.
+    pub password_pwned: Option<bool>,
+    /// 2FA seen in use (code mails, TOTP in export). `None` = unknown.
+    pub has_2fa: Option<bool>,
+    /// The login is a phone number (SIM-swap risk).
+    pub phone_login: bool,
+    /// Known breaches of this service (domain-level) or of this identifier.
+    pub breaches: Vec<BreachRecord>,
+    pub checked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BreachRecord {
+    /// HIBP breach name (stable id).
+    pub name: String,
+    pub title: String,
+    /// `YYYY-MM-DD`.
+    pub breach_date: Option<String>,
+    /// e.g. "Email addresses", "Passwords", "Credit cards" (HIBP data classes).
+    pub data_classes: Vec<String>,
+    /// true = one of the user's identifiers is confirmed in it (HIBP key lookup);
+    /// false = only the service had a breach.
+    pub confirmed_for_user: bool,
+}
+
+/// Emitted by the password importer's audit; merged by
+/// [`crate::merge::merge_security`]. Never contains passwords or hashes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityObservation {
+    pub domain: String,
+    pub identifier: Option<String>,
+    pub password_reuse_count: Option<u32>,
+    pub password_pwned: Option<bool>,
+    pub has_2fa: Option<bool>,
+}
+
+/// A letter / request sent to a company or authority, tracked with its deadline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataRequest {
+    pub id: Uuid,
+    pub kind: RequestKind,
+    /// Company / authority name.
+    pub target: String,
+    pub domain: Option<String>,
+    pub account_id: Option<Uuid>,
+    pub subscription_id: Option<Uuid>,
+    /// Request this one follows up on (reminder, complaint ...).
+    pub parent_id: Option<Uuid>,
+    pub channel: RequestChannel,
+    /// E-mail address or postal address (multi-line).
+    pub recipient: String,
+    pub subject: String,
+    /// Full letter text as sent (for the record).
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub sent_at: Option<DateTime<Utc>>,
+    pub deadline: Option<DateTime<Utc>>,
+    pub status: RequestStatus,
+    #[serde(default)]
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RequestKind {
+    /// Art. 17 GDPR erasure.
+    Erasure,
+    /// Art. 15 GDPR access.
+    Access,
+    /// Art. 21 GDPR objection to direct marketing.
+    Objection,
+    /// Contract cancellation (Kündigung).
+    Cancellation,
+    /// Unterlassungsaufforderung after mails despite unsubscribe / objection.
+    CeaseAndDesist,
+    /// Art. 77 GDPR complaint to a supervisory authority.
+    Complaint,
+    /// Follow-up after a missed deadline.
+    Reminder,
+    /// Credit bureau self-disclosure (Art. 15), e.g. SCHUFA.
+    CreditBureauAccess,
+    /// Objection to address trading / advertising use (Art. 21) at address brokers.
+    AdvertisingObjection,
+}
+
+impl RequestKind {
+    pub fn label_de(self) -> &'static str {
+        match self {
+            RequestKind::Erasure => "Löschantrag",
+            RequestKind::Access => "Auskunftsersuchen",
+            RequestKind::Objection => "Werbewiderspruch",
+            RequestKind::Cancellation => "Kündigung",
+            RequestKind::CeaseAndDesist => "Unterlassungsaufforderung",
+            RequestKind::Complaint => "Beschwerde",
+            RequestKind::Reminder => "Erinnerung",
+            RequestKind::CreditBureauAccess => "Selbstauskunft",
+            RequestKind::AdvertisingObjection => "Widerspruch Adresshandel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RequestChannel {
+    Email,
+    Post,
+    WebForm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum RequestStatus {
+    #[default]
+    Draft,
+    Sent,
+    /// The other side answered (not necessarily fulfilled).
+    Answered,
+    Done,
+    Rejected,
+}
+
+impl RequestStatus {
+    pub fn label_de(self) -> &'static str {
+        match self {
+            RequestStatus::Draft => "Entwurf",
+            RequestStatus::Sent => "Gesendet",
+            RequestStatus::Answered => "Beantwortet",
+            RequestStatus::Done => "Erledigt",
+            RequestStatus::Rejected => "Abgelehnt",
+        }
+    }
 }

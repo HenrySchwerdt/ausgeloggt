@@ -5,6 +5,7 @@
 //! app name is in the body. Nothing is sent anywhere except the user's IMAP server.
 
 pub mod classify;
+pub mod receipts;
 mod imap;
 pub mod unsubscribe;
 
@@ -15,7 +16,7 @@ use chrono::{DateTime, Utc};
 use mailparse::MailHeaderMap;
 use spurlos_core::{
     Evidence, EvidenceKind, Finding, FolderProgress, MailCategory, MailboxConfig, SourceKind,
-    SubscriptionObservation, UnsubscribeMethod,
+    PaymentObservation, SubscriptionObservation, UnsubscribeMethod,
 };
 
 use classify::MailHeader;
@@ -266,6 +267,21 @@ pub struct ScanOutcome {
     pub items_scanned: u64,
     /// New progress markers to store back into `MailboxConfig.progress`.
     pub progress: Vec<FolderProgress>,
+    /// Payments / renewals / price changes seen (merged by `merge::merge_payments`).
+    pub payments: Vec<PaymentObservation>,
+}
+
+/// Options for [`scan_mailbox_with`].
+#[derive(Debug, Clone, Default)]
+pub struct ScanOptions {
+    /// Ignore stored progress and rescan everything.
+    pub full_rescan: bool,
+    /// Lowercase list keys of unsubscribed lists: every mail of these lists becomes a
+    /// `MailRef` (with raw header block) in `SubscriptionObservation.watched_mails`.
+    pub watch_lists: Vec<String>,
+    /// Fetch bodies of receipt / renewal mails (cap 200 KB) to extract amount, plan and
+    /// payment method (card brand + last 4 only). Without it only subjects are used.
+    pub read_receipt_bodies: bool,
 }
 
 const BATCH: usize = 500;
@@ -458,6 +474,7 @@ impl SubAgg {
             last_seen: self.last,
             sample_subjects,
             category,
+            watched_mails: Vec::new(),
         }
     }
 }
@@ -669,6 +686,17 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), MailError> {
 /// Scan the configured folders. Incremental by default: only UIDs above the stored
 /// progress (if UIDVALIDITY matches). `full_rescan` ignores progress.
 /// Runs blocking; call from a worker thread. Checks `cancel` between batches.
+/// Like [`scan_mailbox`] with all wave-2 options (payment extraction, watched lists).
+pub fn scan_mailbox_with(
+    cfg: &MailboxConfig,
+    options: &ScanOptions,
+    on_event: &mut dyn FnMut(ScanEvent),
+    cancel: &AtomicBool,
+) -> Result<ScanOutcome, MailError> {
+    let _ = (cfg, options, on_event, cancel);
+    todo!("implemented by mail agent")
+}
+
 pub fn scan_mailbox(
     cfg: &MailboxConfig,
     full_rescan: bool,
@@ -723,6 +751,7 @@ fn scan_with_client(
         subscriptions,
         items_scanned,
         progress,
+        payments: Vec::new(),
     })
 }
 

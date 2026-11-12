@@ -349,6 +349,7 @@ mod tests {
             category_source: CategorySource::Rules,
             status: SubscriptionStatus::Active,
             history: vec![],
+            post_unsubscribe_mails: Vec::new(),
         }
     }
 

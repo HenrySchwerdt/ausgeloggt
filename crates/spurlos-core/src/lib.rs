@@ -6,6 +6,7 @@
 //! whole thing encrypted on disk.
 
 pub mod domain;
+pub mod insights;
 pub mod merge;
 pub mod model;
 pub mod vault;

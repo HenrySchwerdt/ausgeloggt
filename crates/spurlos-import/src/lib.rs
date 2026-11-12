@@ -199,6 +199,36 @@ pub fn import_zip_bytes(bytes: Vec<u8>) -> Result<ImportResult, ImportError> {
     import_archive(Archive::from_zip(std::io::Cursor::new(bytes))?)
 }
 
+/// Checks a password SHA-1 against a breach corpus (implemented by `spurlos-breach`
+/// via the HIBP k-anonymity range API). Returns how often it was seen, `None` on error.
+pub trait PwnedChecker {
+    fn pwned_count(&self, sha1: &[u8; 20]) -> Option<u64>;
+}
+
+#[derive(Default)]
+pub struct ImportOptions<'a> {
+    /// If set, every distinct password is checked once (SHA-1 computed in memory,
+    /// zeroized right after). `None` = no network, reuse analysis only.
+    pub pwned: Option<&'a dyn PwnedChecker>,
+}
+
+/// Result of [`import_path_with`]: the normal import plus a password audit.
+#[derive(Debug, Clone)]
+pub struct AuditedImport {
+    pub result: ImportResult,
+    /// Per (domain, identifier): reuse count, pwned flag, TOTP present -> has_2fa.
+    /// Contains NO passwords or hashes. Empty for non-password sources.
+    pub security: Vec<spurlos_core::SecurityObservation>,
+}
+
+/// Import with password audit. Reuse detection compares passwords in memory only
+/// (keyed by a per-run random salted hash, all buffers zeroized); nothing about the
+/// password itself leaves this function except counts / booleans.
+pub fn import_path_with(path: &Path, options: &ImportOptions<'_>) -> Result<AuditedImport, ImportError> {
+    let _ = (path, options);
+    todo!("implemented by import agent")
+}
+
 /// Human readable help: how to create an export for each supported source (German).
 pub fn export_instructions() -> Vec<(&'static str, &'static str)> {
     instructions::all()

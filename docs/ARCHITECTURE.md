@@ -2,7 +2,7 @@
 
 Spurlos findet deine Online-Accounts (Postfach, Passwort-Manager, SSO, Datenexporte)
 und hilft beim Löschen (Direktlink, DSGVO-Antrag, Fristen-Tracking). Alles lokal,
-alles in einem verschlüsselten Tresor. Native App mit egui/eframe für Windows, macOS und Linux.
+alles in einem verschlüsselten Tresor. Desktop-App mit **Tauri 2** (Rust-Backend + React/TypeScript/Tailwind-Oberfläche) für Windows, macOS und Linux.
 
 ## Crates
 
@@ -13,7 +13,8 @@ alles in einem verschlüsselten Tresor. Native App mit egui/eframe für Windows,
 | `crates/spurlos-mail` | IMAP-Scan (nur Header) + Klassifizierung (Willkommen, Verifizierung, Reset, Login-Alert, SSO-Grant, Newsletter …) → `Finding`s |
 | `crates/spurlos-catalog` | Lösch-Katalog (Link, Schwierigkeit, Kontakt) + DSGVO-Briefe (Art. 17), `mailto:`, Fristen |
 | `crates/spurlos-ai` | Optionale KI-Einordnung von Newslettern (Werbung/Newsletter/Spam/wichtig) und unsicheren Accounts, lokal per Ollama oder opt-in per Anthropic API |
-| `app` | egui-Oberfläche, Hintergrund-Jobs, Zustandsverwaltung |
+| `desktop/src-tauri` | Tauri-Shell: hält den entsperrten Tresor, stellt die Crates als typisierte IPC-Commands bereit, Hintergrund-Jobs mit Fortschritts-Events, Logo-Cache |
+| `desktop/ui` | Oberfläche: React + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide-react. Läuft auch im Browser mit Mock-API und Demo-Daten (für Screenshots/Design-Iteration) |
 
 Datenfluss: Quelle → `Vec<Finding>` → `merge::merge_findings(&mut VaultData, …)` → `Vault::save()`.
 Newsletter: Mail-Scan → `Vec<SubscriptionObservation>` → `merge::merge_subscriptions` → optional `spurlos_ai::classify_subscriptions` → Abmelden über `spurlos_mail::unsubscribe` (nur One-Click-POST und mailto automatisch, reine Links nur per Klick im Browser).
@@ -36,3 +37,11 @@ Newsletter: Mail-Scan → `Vec<SubscriptionObservation>` → `merge::merge_subsc
    `cargo fmt`. Unit-Tests für jede Parser-/Klassifizierungslogik mit realistischen Fixtures
    (keine echten personenbezogenen Daten).
 6. Nutzer-sichtbare Texte auf **Deutsch**, Code/Kommentare auf Englisch.
+
+## Oberfläche (desktop/ui)
+
+- Design-Regeln: `docs/DESIGN.md` (verbindlich).
+- Eigene Titelleiste (`decorations: false` auf Windows/Linux mit eigenen Fensterknöpfen; macOS `titleBarStyle: Overlay` mit nativen Ampel-Knöpfen).
+- Alle Backend-Aufrufe laufen über `src/lib/api.ts` (ein Interface). Zwei Implementierungen: `tauri` (invoke/Channel) und `mock` (Demo-Daten, im Browser).
+- Keine externen Ressourcen zur Laufzeit (Fonts, Icons, Logos lokal gebündelt), strikte CSP.
+- Logos: offline aus `simple-icons` (CC0); fehlende optional direkt von der Domain des Dienstes über das Rust-Backend (nie über Drittanbieter-Favicon-Dienste), verschlüsselt gecacht (`Vault::seal_bytes`).

@@ -15,6 +15,8 @@
 //! llama3.x, gemma, mistral; embedding models are never picked. Otherwise the first
 //! installed non-embedding model is used.
 
+pub mod vision;
+
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -696,6 +698,7 @@ mod tests {
             category_source: Default::default(),
             status: Default::default(),
             history: vec![],
+            post_unsubscribe_mails: Vec::new(),
         }
     }
 
