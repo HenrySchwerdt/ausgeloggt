@@ -1,47 +1,55 @@
-# ausgeloggt – Architektur
+# ausgeloggt – Architecture
 
-ausgeloggt findet deine Online-Accounts (Postfach, Passwort-Manager, SSO, Datenexporte)
-und hilft beim Löschen (Direktlink, DSGVO-Antrag, Fristen-Tracking). Alles lokal,
-alles in einem verschlüsselten Tresor. Desktop-App mit **Tauri 2** (Rust-Backend + React/TypeScript/Tailwind-Oberfläche) für Windows, macOS und Linux.
+ausgeloggt finds a user's online accounts (mailbox, password managers, SSO, data exports), payments,
+subscriptions and security risks, and helps clean them up (deletion links, GDPR letters, unsubscribing,
+deadline tracking). Everything runs locally and is stored in one encrypted vault. Desktop app built with
+**Tauri 2** (Rust backend + React/TypeScript/Tailwind UI) for Windows, macOS and Linux.
 
 ## Crates
 
-| Crate | Aufgabe |
+| Crate | Purpose |
 |---|---|
-| `crates/ausgeloggt-core` | Datenmodell (`model.rs`, **der Vertrag zwischen allen Crates**), Domain-Normalisierung, Zusammenführung (`merge`), verschlüsselter Tresor (`vault`) |
-| `crates/ausgeloggt-import` | Passwort-Exporte (Chrome, Firefox, Safari, Bitwarden, 1Password, KeePass …), Google Takeout, Facebook-Export, generische Listen → `Finding`s |
-| `crates/ausgeloggt-mail` | IMAP-Scan (nur Header) + Klassifizierung (Willkommen, Verifizierung, Reset, Login-Alert, SSO-Grant, Newsletter …) → `Finding`s |
-| `crates/ausgeloggt-catalog` | Lösch-Katalog (Link, Schwierigkeit, Kontakt) + DSGVO-Briefe (Art. 17), `mailto:`, Fristen |
-| `crates/ausgeloggt-ai` | Optionale KI-Einordnung von Newslettern (Werbung/Newsletter/Spam/wichtig) und unsicheren Accounts, lokal per Ollama oder opt-in per Anthropic API |
-| `desktop/src-tauri` | Tauri-Shell: hält den entsperrten Tresor, stellt die Crates als typisierte IPC-Commands bereit, Hintergrund-Jobs mit Fortschritts-Events, Logo-Cache |
-| `desktop/ui` | Oberfläche: React + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide-react. Läuft auch im Browser mit Mock-API und Demo-Daten (für Screenshots/Design-Iteration) |
+| `crates/ausgeloggt-core` | Data model (`model.rs`, **the contract between all crates**), domain normalisation, merging (`merge`), derived insights (`insights`: billing, risk, score, aliases), encrypted vault (`vault`) |
+| `crates/ausgeloggt-import` | Password-manager exports (Chrome, Firefox, Safari, Bitwarden, 1Password, KeePass …), Google Takeout, Facebook export, generic lists → `Finding`s; in-memory password audit |
+| `crates/ausgeloggt-mail` | IMAP scan (headers only) + classification (welcome, verification, reset, login alert, SSO grant, 2FA, newsletter …), receipts and subscriptions, RFC 8058 unsubscribe |
+| `crates/ausgeloggt-catalog` | Deletion catalog (link, difficulty, contact), 2FA directory, credit bureaus / address brokers, data-protection authorities, help links, GDPR erasure letters |
+| `crates/ausgeloggt-breach` | Have I Been Pwned: Pwned Passwords (k-anonymity), breach catalogue, optional per-address lookups |
+| `crates/ausgeloggt-letters` | Letters as `LetterDoc`, rendered to text or DIN 5008 PDF; legacy kit, privacy report |
+| `crates/ausgeloggt-ai` | Optional AI: newsletter classification, uncertain accounts, SSO screenshot reading, receipt fallback. Local via Ollama or opt-in Anthropic API |
+| `desktop/src-tauri` | Tauri shell: holds the unlocked vault, exposes the crates as typed IPC commands, background jobs with progress events, logo cache |
+| `desktop/ui` | UI: React + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide-react. Also runs in the browser with a mock API and demo data (screenshots / design iteration) |
 
-Datenfluss: Quelle → `Vec<Finding>` → `merge::merge_findings(&mut VaultData, …)` → `Vault::save()`.
-Newsletter: Mail-Scan → `Vec<SubscriptionObservation>` → `merge::merge_subscriptions` → optional `ausgeloggt_ai::classify_subscriptions` → Abmelden über `ausgeloggt_mail::unsubscribe` (nur One-Click-POST und mailto automatisch, reine Links nur per Klick im Browser).
+Data flow: source → `Vec<Finding>` → `merge::merge_findings(&mut VaultData, …)` → `Vault::save()`.
+Newsletters: mail scan → `Vec<SubscriptionObservation>` → `merge::merge_subscriptions` → optional
+`ausgeloggt_ai::classify_subscriptions` → unsubscribe via `ausgeloggt_mail::unsubscribe` (only one-click
+POST and mailto are automated; plain links are opened in the browser on explicit click).
+Payments: mail scan → `Vec<PaymentObservation>` → `merge::merge_payments` → `insights::billing_summary`.
 
-## Regeln für alle Beiträge
+## Rules for all contributions
 
-1. **Plattformübergreifend:** Nur Pure-Rust-Abhängigkeiten oder solche, die ohne Systembibliotheken
-   auf Windows/macOS/Linux bauen. TLS nur über `rustls` mit dem `ring`-Provider (kein OpenSSL,
-   kein `native-tls`, kein `aws-lc-rs`, weil das cmake/nasm braucht). Keine plattformspezifischen APIs ohne
-   `cfg`-Fallback.
-2. **Datenschutz:** Passwörter, Notizen, TOTP-Secrets und Kartendaten aus Exporten werden nie gespeichert.
-   Von Mails werden nur Header gelesen (Ausnahme: SSO-Sicherheitsmails). Keine Telemetrie, keine
-   Netzwerkanfragen außer an IMAP-Server des Nutzers und (abschaltbar) den Katalog-Refresh.
-   Nichts Sensibles loggen.
-3. **Nicht blockieren:** Alles Langsame (Argon2, IMAP, Netzwerk, große Dateien) läuft in Worker-Threads;
-   die UI kommuniziert per Kanal.
-4. **API-Stabilität:** Die öffentlichen Signaturen in den `lib.rs`/`model.rs`-Stubs sind der Vertrag.
-   Hinzufügen ist erlaubt, Ändern bestehender Signaturen nur nach Absprache.
-5. **Qualität:** `cargo clippy --workspace --all-targets` ohne Warnungen, `cargo test --workspace` grün,
-   `cargo fmt`. Unit-Tests für jede Parser-/Klassifizierungslogik mit realistischen Fixtures
-   (keine echten personenbezogenen Daten).
-6. Nutzer-sichtbare Texte auf **Deutsch**, Code/Kommentare auf Englisch.
+1. **Cross-platform:** only pure-Rust dependencies or ones that build without system libraries on
+   Windows/macOS/Linux. TLS only via `rustls` with the `ring` provider (no OpenSSL, no `native-tls`,
+   no `aws-lc-rs`, which needs cmake/nasm). No platform-specific APIs without a `cfg` fallback.
+2. **Privacy:** passwords, notes, TOTP secrets and card numbers from exports are never stored.
+   Mail: headers only (exceptions: SSO security mails; receipt bodies when the user opts in, keeping only
+   amount, plan and card brand + last 4). No telemetry; network requests only to the user's mail servers,
+   optional HIBP, optional catalog refresh and logos from the service's own domain. Never log anything sensitive.
+3. **Never block:** everything slow (Argon2, IMAP, network, large files) runs in worker threads; the UI
+   talks to them via channels / events.
+4. **API stability:** public signatures in `lib.rs` / `model.rs` are the contract. Additive changes are
+   fine (new fields with `#[serde(default)]`); changing existing signatures needs agreement.
+5. **Quality:** `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace`
+   green, `cargo fmt`. Unit tests for every parser / classifier with realistic fixtures (fake data only).
+6. **Language:** user-facing text (app, README, website) in **German**; code, comments, developer docs,
+   issues and commits in English.
 
-## Oberfläche (desktop/ui)
+## UI (desktop/ui)
 
-- Design-Regeln: `docs/DESIGN.md` (verbindlich).
-- Eigene Titelleiste (`decorations: false` auf Windows/Linux mit eigenen Fensterknöpfen; macOS `titleBarStyle: Overlay` mit nativen Ampel-Knöpfen).
-- Alle Backend-Aufrufe laufen über `src/lib/api.ts` (ein Interface). Zwei Implementierungen: `tauri` (invoke/Channel) und `mock` (Demo-Daten, im Browser).
-- Keine externen Ressourcen zur Laufzeit (Fonts, Icons, Logos lokal gebündelt), strikte CSP.
-- Logos: offline aus `simple-icons` (CC0); fehlende optional direkt von der Domain des Dienstes über das Rust-Backend (nie über Drittanbieter-Favicon-Dienste), verschlüsselt gecacht (`Vault::seal_bytes`).
+- Design rules: `docs/DESIGN.md` (binding).
+- Custom titlebar (`decorations: false` on Windows/Linux with own window controls; macOS
+  `titleBarStyle: Overlay` with native traffic lights).
+- All backend calls go through `src/lib/api.ts` (one interface) with two implementations: `tauri`
+  (invoke / channels) and `mock` (demo data, browser).
+- No external resources at runtime (fonts, icons and logos bundled), strict CSP.
+- Logos: offline from `simple-icons` (CC0); missing ones optionally fetched from the service's own domain by
+  the Rust backend (never via third-party favicon services), cached encrypted (`Vault::seal_bytes`).

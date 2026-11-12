@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://henryschwerdt.github.io/ausgeloggt/sitemap.xml

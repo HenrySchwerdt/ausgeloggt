@@ -1,9 +1,9 @@
-name: Idee vorschlagen
-description: Eine neue Funktion oder Verbesserung
-labels: [idee]
+name: Feature request
+description: Suggest an idea
+labels: [enhancement]
 body:
   - type: textarea
     attributes:
-      label: Was soll ausgeloggt können?
+      label: What would you like ausgeloggt to do?
     validations:
       required: true

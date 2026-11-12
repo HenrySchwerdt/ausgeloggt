@@ -1,28 +1,25 @@
-# Sicherheit
+# Security policy
 
-ausgeloggt verarbeitet sehr sensible Daten: Postfach-Zugang, Account-Listen und Hinweise auf Zahlungsdaten. Meldungen zu Sicherheitslücken sind deshalb sehr willkommen.
+ausgeloggt handles very sensitive data (mailbox access, account lists, payment hints), so security reports are very welcome.
 
-## Sicherheitslücke melden
+## Reporting a vulnerability
 
-Bitte **kein öffentliches Issue** anlegen. Nutze stattdessen die private Meldung von GitHub:
-**Security → Report a vulnerability** auf https://github.com/HenrySchwerdt/ausgeloggt.
+Please **do not open a public issue**. Use GitHub's private vulnerability reporting instead:
+**Security → Report a vulnerability** on https://github.com/HenrySchwerdt/ausgeloggt.
 
-Beschreibe, wie sich das Problem nachstellen lässt, und nenne Version oder Commit. Du bekommst innerhalb von 7 Tagen eine Antwort.
+Include steps to reproduce and the affected version or commit. You will get an answer within 7 days.
 
-## Was besonders interessiert
+## Scope
 
-- Verschlüsselung und Schlüsselverwaltung des Tresors (`crates/ausgeloggt-core/src/vault.rs`)
-- Alles, wodurch Daten das Gerät verlassen könnten: Netzwerk-Code in `ausgeloggt-mail`, `-breach`, `-catalog`, `-ai` und in der Tauri-Shell
-- Importer für fremde Dateien: ZIP, CSV, JSON, Path Traversal, Zip-Bomben
-- Prompt-Injection in den optionalen KI-Funktionen
-- Tauri-IPC und CSP in `desktop/`
+- Vault encryption and key handling (`crates/ausgeloggt-core/src/vault.rs`)
+- Anything that could leak data off the device: network code in `ausgeloggt-mail`, `-breach`, `-catalog`, `-ai` and the Tauri shell
+- Importers handling untrusted files (ZIP/CSV/JSON parsing, path traversal, decompression bombs)
+- Prompt-injection paths into the optional AI features
+- Tauri IPC / CSP issues in `desktop/`
 
-## So ist es gebaut
+## Design notes
 
-- **Tresor:**
-  - Schlüssel per Argon2id (64 MiB, t=3), verschlüsselt mit XChaCha20-Poly1305.
-  - Der Header ist als AAD mit authentifiziert.
-  - Gespeichert wird atomar, Schlüssel werden im Speicher gelöscht.
-- **Passwörter aus Importen** werden nur im Arbeitsspeicher für die Prüfung auf Wiederverwendung und Leaks benutzt. Sie werden nie gespeichert oder geloggt.
-- **Pwned Passwords** wird über die k-Anonymitäts-API abgefragt, also nur mit 5 Hex-Zeichen des SHA-1-Hashes und mit Padding.
-- **TLS** ausschließlich über rustls, kein OpenSSL.
+- Vault: Argon2id (64 MiB, t=3) → XChaCha20-Poly1305, header authenticated as AAD, atomic writes, keys zeroized.
+- Passwords from imports are used only in memory for reuse/pwned checks and are never stored or logged.
+- Pwned Passwords uses the k-anonymity range API (5 hex chars of the SHA-1) with padding.
+- TLS only via rustls; no OpenSSL.

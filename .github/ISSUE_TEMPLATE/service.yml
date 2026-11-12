@@ -1,20 +1,20 @@
-name: Dienst / Lösch-Info
-description: Ein Dienst fehlt, oder Lösch-Link bzw. Schwierigkeit stimmen nicht
-labels: [katalog]
+name: Service / deletion info
+description: A service is missing, or its deletion link / difficulty is wrong
+labels: [catalog]
 body:
   - type: input
     attributes:
-      label: Dienst und Domain
-      placeholder: Beispiel GmbH, beispiel.de
+      label: Service and domain
+      placeholder: Example GmbH, example.com
     validations:
       required: true
   - type: input
     attributes:
-      label: Link zur Löschseite
+      label: Deletion page URL
   - type: dropdown
     attributes:
-      label: Schwierigkeit
-      options: [Einfach, Mittel, Schwer, Nicht möglich, Unbekannt]
+      label: Difficulty
+      options: [Easy, Medium, Hard, Impossible, Unknown]
   - type: textarea
     attributes:
-      label: Hinweise (Schritte, Datenschutz-Kontakt, Postanschrift)
+      label: Notes (steps, privacy contact, postal address)

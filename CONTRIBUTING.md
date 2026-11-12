@@ -1,14 +1,14 @@
-# Mitmachen
+# Contributing
 
-Danke, dass du helfen willst! Issues und Pull Requests sind willkommen.
+Thanks for helping! Issues and pull requests are welcome.
 
-## Einfache Wege zu helfen
+## Easy ways to help
 
-- **Ein Dienst fehlt oder der Lösch-Link stimmt nicht?** Lege ein Issue mit der Vorlage „Dienst / Lösch-Info“ an.
-- **Eine Mail wird nicht erkannt** (Willkommen, Rechnung, 2FA …)? Lege ein Issue mit *anonymisierter* Betreffzeile und Absender-Domain an. Bitte nie echte persönliche Daten einfügen.
-- **Neues Exportformat eines Passwort-Managers?** Hänge die Kopfzeile mit erfundenen Daten an.
+- **Missing service or wrong deletion link?** Open an issue with the "Service / deletion info" template.
+- **A mail type isn't recognised** (welcome, receipt, 2FA …)? Open an issue with an *anonymised* subject line and sender domain. Never paste real personal data.
+- **New password-manager export format?** Attach a header row with fake data.
 
-## Entwicklung
+## Development
 
 ```bash
 cargo test --workspace
@@ -17,9 +17,9 @@ cargo fmt --all
 cd desktop/ui && npm ci && npm run build
 ```
 
-Die Regeln stehen in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md):
-- Plattformübergreifende Abhängigkeiten in reinem Rust, TLS nur über rustls.
-- Datenschutz zuerst: keine Telemetrie, keine Anfragen an Dritte, nie sensible Daten loggen.
-- Die Oberfläche folgt [docs/DESIGN.md](docs/DESIGN.md).
-- Texte für Nutzer auf Deutsch, Code und Kommentare auf Englisch.
-- Tests für jede Änderung an Parsern und an der Erkennung, nur mit erfundenen Daten.
+Rules (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
+- Cross-platform, pure-Rust dependencies; TLS via rustls only.
+- Privacy first: no telemetry, no third-party requests, never log sensitive data.
+- The UI follows [docs/DESIGN.md](docs/DESIGN.md).
+- User-facing text (app, README, website) in German; code, comments, developer docs and commits in English.
+- Tests for every parser / classifier change, with fake data only.
