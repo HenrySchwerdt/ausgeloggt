@@ -1,7 +1,7 @@
 import {
   buildAccounts, buildRuns, buildSubscriptions, catalogFor, gdprLetterText, MAILBOXES,
   type CatalogInfo, type GdprLetter,
-} from "./mock-data";
+} from "./mock/data";
 import type {
   AccountStatus, DeletionMethod, Settings, Snapshot, SubscriptionStatus,
 } from "./types";

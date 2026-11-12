@@ -2,7 +2,7 @@
 import type {
   Account, AccountStatus, DeletionStep, Evidence, EvidenceKind, MailCategory, SourceKind, SourceRun,
   SsoProvider, Subscription, SubscriptionStatus, UnsubscribeMethod,
-} from "./types";
+} from "../types";
 
 const DAY = 86_400_000;
 const now = Date.now();
