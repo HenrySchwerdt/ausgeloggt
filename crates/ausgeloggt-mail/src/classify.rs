@@ -1462,6 +1462,19 @@ pub fn classify_for(header: &MailHeader, own_address: Option<&str>) -> Option<Cl
     {
         return None;
     }
+    // Mail that is visibly addressed to somebody else (spam via BCC, test sends to
+    // `no-reply@sandbox...`) is no evidence of an account of the mailbox owner.
+    if own_address.map(|o| recipient_match(&to_addrs, o)) == Some(Recipient::Foreign) {
+        return None;
+    }
+    // A display name that claims a brand or authority the sending domain does not belong
+    // to ("DRV E-mail-Service" <x@lamgrandconcept.ro>) is phishing, not an account.
+    if name
+        .as_deref()
+        .is_some_and(|n| display_name_impersonates(n, &host))
+    {
+        return None;
+    }
 
     let folded = fold(&decode_header(&header.subject));
     let bulk = is_bulk(header);
@@ -1509,10 +1522,11 @@ pub fn classify_for(header: &MailHeader, own_address: Option<&str>) -> Option<Cl
         Some(r) if !sender_is_apple => (Some(SsoProvider::Apple), Some(r)),
         _ => (
             None,
-            if to_addrs.len() == 1 {
-                to_addrs.first().cloned()
-            } else {
-                None
+            // Only the user's own address (or a plus variant of it) is an identifier.
+            match own_address {
+                Some(o) => to_addrs.iter().find(|a| is_own_variant(a, o)).cloned(),
+                None if to_addrs.len() == 1 => to_addrs.first().cloned(),
+                None => None,
             },
         ),
     };
@@ -2436,5 +2450,229 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(c.kind, EvidenceKind::LoginAlert);
+    }
+}
+
+/// How a mail's recipients relate to the scanned mailbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recipient {
+    /// One recipient is the mailbox (or a plus variant / Apple relay address).
+    Own,
+    /// Recipients are hidden (BCC newsletters, undisclosed recipients) or on the
+    /// mailbox's own custom domain (possible alias): keep, but don't trust the identifier.
+    Unknown,
+    /// All recipients are clearly somebody else.
+    Foreign,
+}
+
+/// `max+news@web.de` and `MAX@web.de` are variants of `max@web.de`.
+fn is_own_variant(addr: &str, own: &str) -> bool {
+    let own = own.trim().to_lowercase();
+    let addr = addr.trim().to_lowercase();
+    if addr == own {
+        return true;
+    }
+    let (Some((ol, oh)), Some((al, ah))) = (own.rsplit_once('@'), addr.rsplit_once('@')) else {
+        return false;
+    };
+    oh == ah && al.split('+').next() == Some(ol)
+}
+
+fn recipient_match(to: &[String], own: &str) -> Recipient {
+    if to.is_empty() {
+        return Recipient::Unknown;
+    }
+    if to
+        .iter()
+        .any(|a| is_own_variant(a, own) || is_apple_relay(a))
+    {
+        return Recipient::Own;
+    }
+    let own_host = own.rsplit_once('@').map(|(_, h)| h.to_lowercase());
+    // Big free-mail domains host millions of other people, so an unknown address there is
+    // foreign; on a custom domain it may be one of the owner's aliases.
+    let own_is_freemail = own_host.as_deref().is_some_and(is_freemail);
+    if !own_is_freemail && to.iter().any(|a| Some(host_of(a)) == own_host.as_deref()) {
+        return Recipient::Unknown;
+    }
+    Recipient::Foreign
+}
+
+/// Brands and authorities that spammers put into the display name, with the domain
+/// words that legitimately send for them.
+const DISPLAY_BRANDS: &[(&str, &[&str])] = &[
+    ("drv", &["deutsche-rentenversicherung", "drv-bund", "drv"]),
+    (
+        "rentenversicherung",
+        &["deutsche-rentenversicherung", "drv-bund", "drv"],
+    ),
+    ("finanzamt", &["elster", "finanzamt", "bzst"]),
+    ("elster", &["elster"]),
+    ("bundesagentur", &["arbeitsagentur", "bundesagentur"]),
+    ("sparkasse", &["sparkasse", "starfinanz"]),
+    ("volksbank", &["volksbank", "vr", "atruvia"]),
+    ("postbank", &["postbank"]),
+    ("commerzbank", &["commerzbank", "comdirect"]),
+    ("deutsche bank", &["db", "deutsche-bank"]),
+    ("dkb", &["dkb"]),
+    ("n26", &["n26"]),
+    ("paypal", &["paypal"]),
+    ("amazon", &["amazon", "amazonses"]),
+    ("apple", &["apple", "icloud"]),
+    (
+        "microsoft",
+        &["microsoft", "office", "outlook", "live", "msn"],
+    ),
+    ("google", &["google", "youtube"]),
+    ("netflix", &["netflix"]),
+    ("dhl", &["dhl", "deutschepost"]),
+    ("deutsche post", &["deutschepost", "dhl"]),
+    ("telekom", &["telekom", "t-online", "magenta"]),
+    ("vodafone", &["vodafone"]),
+    ("doctolib", &["doctolib"]),
+    ("aok", &["aok"]),
+    ("techniker krankenkasse", &["tk"]),
+    ("barmer", &["barmer"]),
+    ("schufa", &["schufa"]),
+    (
+        "postcode lotterie",
+        &["postcode-lotterie", "postcodelotterie"],
+    ),
+];
+
+/// True if the display name names a brand / authority from [`DISPLAY_BRANDS`] as a whole
+/// word while the sender host carries none of its domain words.
+pub(crate) fn display_name_impersonates(display: &str, host: &str) -> bool {
+    let name = fold(&decode_header(display));
+    let words: Vec<&str> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let joined = words.join(" ");
+    let host = host.to_lowercase();
+    let labels: Vec<&str> = host.split('.').collect();
+    DISPLAY_BRANDS.iter().any(|(brand, legit)| {
+        let hit = if brand.contains(' ') {
+            joined.contains(brand)
+        } else {
+            words.contains(brand)
+        };
+        hit && !legit.iter().any(|l| {
+            labels
+                .iter()
+                .any(|label| label == l || label.starts_with(l))
+        })
+    })
+}
+
+#[cfg(test)]
+mod recipient_and_display_tests {
+    use super::*;
+
+    fn h(from: &str, to: &str, subject: &str) -> MailHeader {
+        MailHeader {
+            from: from.into(),
+            to: to.into(),
+            subject: subject.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn foreign_recipient_is_not_account_evidence() {
+        let own = Some("max.muster@web.de");
+        let spam = h(
+            "Doctolib <info@premierbiotech.example>",
+            "alan.rahbek2673@example.org",
+            "Willkommen bei Doctolib",
+        );
+        assert!(classify_for(&spam, own).is_none());
+        let sandbox = h(
+            "Support <no-reply@courier.example>",
+            "no-reply@sandbox77.example",
+            "Bitte bestätige deine E-Mail",
+        );
+        assert!(classify_for(&sandbox, own).is_none());
+        // a different address on the same free-mail domain is somebody else too
+        let other = h(
+            "Shop <noreply@shop.example>",
+            "someone.else@web.de",
+            "Willkommen bei Shop",
+        );
+        assert!(classify_for(&other, own).is_none());
+    }
+
+    #[test]
+    fn own_and_hidden_recipients_still_count() {
+        let own = Some("max.muster@web.de");
+        let mine = h(
+            "Spotify <no-reply@spotify.com>",
+            "Max <MAX.MUSTER@web.de>",
+            "Willkommen bei Spotify",
+        );
+        let c = classify_for(&mine, own).unwrap();
+        assert_eq!(c.identifier.as_deref(), Some("max.muster@web.de"));
+        let plus = h(
+            "Shop <noreply@shop.example>",
+            "max.muster+shop@web.de",
+            "Willkommen bei Shop",
+        );
+        assert_eq!(
+            classify_for(&plus, own).unwrap().identifier.as_deref(),
+            Some("max.muster+shop@web.de")
+        );
+        let bcc = h(
+            "News <news@shop.example>",
+            "undisclosed-recipients:;",
+            "Willkommen bei Shop",
+        );
+        assert_eq!(classify_for(&bcc, own).unwrap().identifier, None);
+    }
+
+    #[test]
+    fn custom_domain_alias_is_kept_without_identifier() {
+        let own = Some("me@example-family.de");
+        let alias = h(
+            "Shop <noreply@shop.example>",
+            "shopping@example-family.de",
+            "Willkommen bei Shop",
+        );
+        assert_eq!(classify_for(&alias, own).unwrap().identifier, None);
+    }
+
+    #[test]
+    fn display_name_brand_on_foreign_domain_is_phishing() {
+        assert!(display_name_impersonates(
+            "DRV E-mail-Service Zugang",
+            "lamgrandconcept.ro"
+        ));
+        assert!(display_name_impersonates(
+            "Sparkasse Kundenservice",
+            "mail.secure-kunden.top"
+        ));
+        assert!(display_name_impersonates(
+            "Deutsche Postcode Lotterie",
+            "finanzselect-mailings.de"
+        ));
+        assert!(!display_name_impersonates(
+            "Deutsche Rentenversicherung",
+            "drv-bund.de"
+        ));
+        assert!(!display_name_impersonates(
+            "Sparkasse",
+            "sparkasse-koelnbonn.de"
+        ));
+        assert!(!display_name_impersonates("PayPal", "paypal.de"));
+        assert!(!display_name_impersonates(
+            "Ingrid vom Team",
+            "shop.example"
+        ));
+        assert!(!display_name_impersonates("Spotify", "spotify.com"));
+        let drv = h(
+            "DRV E-mail-Service <service@lamgrandconcept.ro>",
+            "max@web.de",
+            "Ihr Konto wurde gesperrt, bitte bestätigen",
+        );
+        assert!(classify_for(&drv, Some("max@web.de")).is_none());
     }
 }
