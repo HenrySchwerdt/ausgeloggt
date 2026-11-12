@@ -1,0 +1,119 @@
+name: Release
+
+# Push a tag like v0.1.0-alpha.1 to build installers for all platforms and publish
+# them as a GitHub release. Tags containing alpha/beta/rc become pre-releases.
+# Signing is optional: macOS is signed and notarised only when the APPLE_* secrets
+# exist; without them the builds are unsigned test builds.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            args: ""
+          - name: macos
+            os: macos-latest
+            args: "--target universal-apple-darwin"
+          - name: linux
+            os: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev patchelf rpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: desktop/ui
+        run: npm ci
+
+      - name: Apple signing (only if secrets are configured)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No Apple secrets configured: building an unsigned macOS app."
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
+          {
+            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+            echo "APPLE_API_KEY=$APPLE_API_KEY"
+            echo "APPLE_API_KEY_PATH=$key_path"
+          } >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tauriScript: npm --prefix ui exec -- tauri
+          args: ${{ matrix.args }}
+          # Manual runs (workflow_dispatch) only build; tags also publish a release.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ausgeloggt ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          releaseBody: |
+            Testversion zum Ausprobieren. Noch nicht signiert, deshalb warnen Windows und macOS beim ersten Start.
+
+            **Windows:** Bei „Der Computer wurde durch Windows geschützt“ auf „Weitere Informationen“ und dann „Trotzdem ausführen“ klicken.
+
+            **macOS:** Die App in den Ordner Programme ziehen. Beim ersten Start mit rechter Maustaste auf die App klicken und „Öffnen“ wählen. Falls macOS das verweigert: Systemeinstellungen, Datenschutz und Sicherheit, ganz unten „Dennoch öffnen“.
+
+            **Linux:** AppImage ausführbar machen (`chmod +x`) und starten, oder das .deb bzw. .rpm Paket installieren.
+
+            Deine Daten bleiben auf deinem Rechner. Fehler bitte als Issue melden, ohne persönliche Daten.
+
+      - name: Keep installers as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ausgeloggt-${{ matrix.name }}
+          path: |
+            target/**/release/bundle/**/*.msi
+            target/**/release/bundle/**/*.exe
+            target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.AppImage
+            target/**/release/bundle/**/*.deb
+            target/**/release/bundle/**/*.rpm
+          if-no-files-found: warn
+          retention-days: 14
