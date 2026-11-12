@@ -537,6 +537,9 @@ pub struct Settings {
     pub allow_catalog_updates: bool,
     pub dark_mode: bool,
     pub ai: AiSettings,
+    /// Fetch missing logos directly from the service's own domain (never via third-party
+    /// favicon services). Bundled offline logos are always used.
+    pub fetch_logos: bool,
 }
 
 impl Default for Settings {
@@ -549,6 +552,7 @@ impl Default for Settings {
             allow_catalog_updates: true,
             dark_mode: true,
             ai: AiSettings::default(),
+            fetch_logos: true,
         }
     }
 }

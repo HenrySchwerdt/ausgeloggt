@@ -6,7 +6,6 @@ members = [
     "crates/spurlos-mail",
     "crates/spurlos-catalog",
     "crates/spurlos-ai",
-    "app",
 ]
 
 [workspace.package]

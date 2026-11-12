@@ -255,12 +255,67 @@ impl Vault {
         base.join("Spurlos").join("vault.spurlos")
     }
 
+    /// Encrypt arbitrary bytes with the vault key, e.g. the logo cache, which would
+    /// otherwise reveal which services the user has accounts with.
+    /// Output: `nonce (24) || ciphertext`. `label` is bound as AAD, so a blob sealed
+    /// for one purpose cannot be opened as another. Blobs become unreadable after
+    /// [`Vault::change_password`]; callers must treat them as a disposable cache.
+    pub fn seal_bytes(&self, label: &str, plain: &[u8]) -> Result<Vec<u8>, VaultError> {
+        let nonce = random::<24>()?;
+        let aad = blob_aad(label);
+        let ct = cipher(&self.key)?
+            .encrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: plain,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| VaultError::Crypto("Verschlüsselung fehlgeschlagen".into()))?;
+        let mut out = Vec::with_capacity(24 + ct.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ct);
+        Ok(out)
+    }
+
+    /// Decrypt a blob produced by [`Vault::seal_bytes`] with the same `label`.
+    pub fn open_bytes(&self, label: &str, sealed: &[u8]) -> Result<Vec<u8>, VaultError> {
+        if sealed.len() < 24 + TAG_LEN {
+            return Err(VaultError::WrongPasswordOrCorrupt);
+        }
+        let nonce: [u8; 24] = sealed[..24].try_into().expect("24 bytes");
+        let aad = blob_aad(label);
+        cipher(&self.key)?
+            .decrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: &sealed[24..],
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| VaultError::WrongPasswordOrCorrupt)
+    }
+
+    /// Directory for encrypted caches next to the vault file: `<vault dir>/cache`.
+    pub fn cache_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(|p| p.join("cache"))
+            .unwrap_or_else(|| PathBuf::from("cache"))
+    }
+
     /// Export a plain-JSON copy (user-initiated backup / portability).
     pub fn export_json(&self, path: &Path) -> Result<(), VaultError> {
         let json = Zeroizing::new(serde_json::to_vec_pretty(&self.data)?);
         write_synced(path, &json)?;
         Ok(())
     }
+}
+
+fn blob_aad(label: &str) -> Vec<u8> {
+    let mut aad = b"SPURLOS-BLOB\0".to_vec();
+    aad.extend_from_slice(label.as_bytes());
+    aad
 }
 
 /// `<path>.<ext>` appended to the full file name (`vault.spurlos` -> `vault.spurlos.tmp`).
@@ -471,6 +526,21 @@ mod tests {
         // overwriting an existing file works on every platform
         v.save().unwrap();
         assert!(Vault::open(&p, "geheim").is_ok());
+    }
+
+    #[test]
+    fn sealed_blobs_roundtrip_and_bind_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, v) = new_vault(&dir);
+        let sealed = v.seal_bytes("logos", b"png bytes").unwrap();
+        assert_ne!(&sealed[24..], b"png bytes");
+        assert_eq!(v.open_bytes("logos", &sealed).unwrap(), b"png bytes");
+        assert!(v.open_bytes("other", &sealed).is_err());
+        let mut bad = sealed.clone();
+        *bad.last_mut().unwrap() ^= 1;
+        assert!(v.open_bytes("logos", &bad).is_err());
+        assert!(v.open_bytes("logos", &sealed[..10]).is_err());
+        assert!(v.cache_dir().ends_with("cache"));
     }
 
     #[test]
