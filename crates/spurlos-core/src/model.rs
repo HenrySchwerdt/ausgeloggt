@@ -66,7 +66,11 @@ pub enum UnsubscribeMethod {
     /// RFC 8058 one-click: POST `List-Unsubscribe=One-Click` to `url`. Safe to automate.
     OneClick { url: String },
     /// `mailto:` unsubscribe; send a mail via SMTP. Safe to automate.
-    Mailto { address: String, subject: Option<String>, body: Option<String> },
+    Mailto {
+        address: String,
+        subject: Option<String>,
+        body: Option<String>,
+    },
     /// Plain https link. Only ever opened in the browser on explicit user click.
     Link { url: String },
 }
@@ -289,8 +293,12 @@ impl EvidenceKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceKind {
     /// Mail scan; `mailbox` is the address that was scanned.
-    Mail { mailbox: String },
-    PasswordExport { format: PasswordFormat },
+    Mail {
+        mailbox: String,
+    },
+    PasswordExport {
+        format: PasswordFormat,
+    },
     GoogleTakeout,
     FacebookExport,
     /// Generic CSV/JSON/text list of domains or URLs.
@@ -388,7 +396,9 @@ impl SsoProvider {
             SsoProvider::Facebook => Some("https://www.facebook.com/settings?tab=applications"),
             SsoProvider::Discord => Some("https://discord.com/settings/authorized-apps"),
             SsoProvider::X => Some("https://x.com/settings/connected_apps"),
-            SsoProvider::LinkedIn => Some("https://www.linkedin.com/mypreferences/d/permitted-services"),
+            SsoProvider::LinkedIn => {
+                Some("https://www.linkedin.com/mypreferences/d/permitted-services")
+            }
             SsoProvider::Amazon => Some("https://www.amazon.com/ap/adam"),
             SsoProvider::Other(_) => None,
         }
@@ -441,11 +451,17 @@ pub struct DeletionStep {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DeletionMethod {
     /// Opened the service's own deletion page.
-    DirectLink { url: String },
+    DirectLink {
+        url: String,
+    },
     /// Sent a GDPR Art. 17 erasure request by e-mail.
-    GdprEmail { to: String },
+    GdprEmail {
+        to: String,
+    },
     /// Revoked SSO access at the provider (does NOT delete the account!).
-    SsoRevoked { provider: SsoProvider },
+    SsoRevoked {
+        provider: SsoProvider,
+    },
     /// Service confirmed deletion.
     Confirmed,
     Other,
