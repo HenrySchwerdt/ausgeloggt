@@ -1,0 +1,8 @@
+{
+  "name": "ausgeloggt-desktop",
+  "private": true,
+  "description": "Forwards the Tauri CLI installed in ui/ so tools can run it from this folder.",
+  "scripts": {
+    "tauri": "npm --prefix ui exec -- tauri"
+  }
+}

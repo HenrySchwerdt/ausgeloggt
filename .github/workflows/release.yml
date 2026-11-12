@@ -31,7 +31,7 @@ jobs:
             args: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Linux system dependencies
         if: runner.os == 'Linux'
@@ -45,7 +45,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -86,7 +86,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: desktop
-          tauriScript: npm --prefix ui exec -- tauri
+          tauriScript: npm run tauri
           args: ${{ matrix.args }}
           # Manual runs (workflow_dispatch) only build; tags also publish a release.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -105,7 +105,7 @@ jobs:
             Deine Daten bleiben auf deinem Rechner. Fehler bitte als Issue melden, ohne persönliche Daten.
 
       - name: Keep installers as workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ausgeloggt-${{ matrix.name }}
           path: |
