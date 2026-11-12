@@ -4,16 +4,19 @@ import { brandPath } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import type { AccountStatus, SubscriptionStatus } from "@/lib/types";
 
-/* ---------- Logo mark (matches public/icon.svg) ---------- */
+/* ---------- Logo mark (matches public/icon.svg and site/assets/brand/mark.svg) ---------- */
 export function LogoMark({ size = 20, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 1024 1024" className={cn("shrink-0", className)} aria-hidden>
-      <rect width="1024" height="1024" rx="230" className="fill-primary" />
-      <g className="fill-primary-fg">
-        <circle cx="384" cy="384" r="208" />
-        <circle cx="650" cy="650" r="108" fillOpacity=".55" />
-        <circle cx="800" cy="800" r="56" fillOpacity=".28" />
-      </g>
+    <svg width={size} height={size} viewBox="0 0 64 64" className={cn("shrink-0", className)} aria-hidden>
+      <path
+        d="M49 24v-3a10 10 0 0 0-10-10H19a10 10 0 0 0-10 10v22a10 10 0 0 0 10 10h20a10 10 0 0 0 10-10v-3"
+        fill="none"
+        strokeWidth="6.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="stroke-fg"
+      />
+      <circle cx="57" cy="32" r="5.5" className="fill-[#8fc41f] dark:fill-[#c4f25a]" />
     </svg>
   );
 }

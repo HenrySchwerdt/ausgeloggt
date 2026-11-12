@@ -15,12 +15,7 @@ shoot(){ # name  query+hash
 }
 shoot dashboard        "#/"
 shoot dashboard-light  "&theme=light#/"
-shoot accounts         "#/accounts"
 shoot detail           "&select=spotify#/accounts"
-shoot letter           "&select=spotify&gdpr#/accounts"
-shoot newsletter       "#/newsletter"
-shoot deletions        "#/deletions"
-shoot palette          "&palette#/accounts"
 python - "$RAWW" "$OUT" <<'PY'
 import sys,glob,os
 from PIL import Image
