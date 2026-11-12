@@ -1,0 +1,163 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter/index.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design tokens, see docs/DESIGN.md */
+:root {
+  --bg: #ffffff;
+  --sidebar: #fafafa;
+  --surface: #ffffff;
+  --muted: #f4f4f5;
+  --muted-hover: #ececee;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --fg: #09090b;
+  --fg-muted: #71717a;
+  --fg-faint: #a1a1aa;
+  --primary: #18181b;
+  --primary-fg: #fafafa;
+  --overlay: rgba(9, 9, 11, 0.4);
+  --popover-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --s-green: #22c55e;
+  --s-yellow: #eab308;
+  --s-red: #ef4444;
+  --s-blue: #3b82f6;
+  --s-violet: #a855f7;
+  --s-gray: #71717a;
+  color-scheme: light;
+}
+.dark {
+  --bg: #09090b;
+  --sidebar: #0c0c0e;
+  --surface: #111113;
+  --muted: #18181b;
+  --muted-hover: #1f1f23;
+  --border: #1f1f23;
+  --border-strong: #2e2e33;
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --fg-faint: #63636b;
+  --primary: #fafafa;
+  --primary-fg: #09090b;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --popover-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --color-muted-hover: var(--muted-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-s-green: var(--s-green);
+  --color-s-yellow: var(--s-yellow);
+  --color-s-red: var(--s-red);
+  --color-s-blue: var(--s-blue);
+  --color-s-violet: var(--s-violet);
+  --color-s-gray: var(--s-gray);
+
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 16px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+  --text-lg: 14px;
+  --text-lg--line-height: 20px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-popover: var(--popover-shadow);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 20px;
+    font-feature-settings: "cv11", "ss03", "calt";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  input,
+  textarea,
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  button {
+    cursor: default;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--s-blue) 35%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--fg) 35%, transparent);
+    outline-offset: 1px;
+  }
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.anim-fade { animation: fade-in 140ms ease-out both; }
+.anim-pop { animation: pop-in 140ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.anim-slide-right { animation: slide-in-right 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.anim-slide-up { animation: slide-up 160ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade, .anim-pop, .anim-slide-right, .anim-slide-up { animation: none; }
+}

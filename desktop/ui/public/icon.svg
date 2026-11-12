@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1c20"/>
+      <stop offset="1" stop-color="#09090b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#g)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="224" fill="none" stroke="#ffffff" stroke-opacity=".10" stroke-width="12"/>
+  <!-- footprint that fades out: Spurlos = traceless -->
+  <g fill="#fafafa">
+    <circle cx="384" cy="384" r="208"/>
+    <circle cx="650" cy="650" r="108" fill-opacity=".55"/>
+    <circle cx="800" cy="800" r="56" fill-opacity=".28"/>
+  </g>
+</svg>
