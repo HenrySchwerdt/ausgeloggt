@@ -78,7 +78,8 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.03em;line-height:1.1;text-wra
 .btn svg{width:15px;height:15px}
 
 /* hero */
-.hero{padding:clamp(48px,6vw,80px) 0 0}
+.hero{padding:clamp(48px,6vw,80px) 0 clamp(64px,8vw,112px)}
+.hero+.sec{border-top:0;padding-top:clamp(24px,3vw,40px)}
 .hero h1{font-size:clamp(38px,5.2vw,64px);letter-spacing:-.04em;line-height:1.05;max-width:17ch}
 .hero .lead{margin-top:20px;font-size:clamp(17px,1.5vw,20px);color:var(--text-2);max-width:48ch;line-height:1.55}
 .hero .cta{margin-top:28px;display:flex;gap:10px;flex-wrap:wrap}
