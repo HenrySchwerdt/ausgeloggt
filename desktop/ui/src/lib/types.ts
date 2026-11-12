@@ -1,166 +1,29 @@
-// Mirrors crates/ausgeloggt-core/src/model.rs (serde default representation).
-// Unit variants -> string, struct/newtype variants -> { Variant: payload }.
+// Types come from ipc.ts (mirror of the Rust DTOs). This file adds labels and small helpers.
+import type {
+  AccountStatus, BillingInterval, DeletionMethod, Difficulty, EvidenceKind, LetterKind, MailCategory,
+  MailboxDto, PasswordFormat, PaymentMethod, RequestKind, RequestStatus, RiskReason, SettingsDto, SnapshotDto,
+  SourceKind, SsoProvider, SubscriptionStatus,
+} from "./ipc";
 
-export type Uuid = string;
-/** RFC 3339 timestamp (chrono DateTime<Utc>). */
-export type IsoDate = string;
+export type {
+  Uuid, IsoDate, JobId, ErrorCode, IpcErrorPayload,
+  UnsubscribeMethod, MailCategory, CategorySource, SubscriptionStatus, UnsubscribeAttempt, MailRef, Subscription,
+  EvidenceKind, PasswordFormat, SsoProvider, SourceKind, AccountStatus, DeletionMethod, DeletionStep, Evidence,
+  PaymentKind, PaymentMethod, PaymentRecord, BreachRecord, SecurityInfo, Account, SourceRun, FolderProgress,
+  RequestKind, RequestChannel, RequestStatus, DataRequest, AiProvider, Identity, AiSettingsDto, SettingsPatch,
+  BillingInterval, BillingSummary, RiskReason, RiskAssessment, PrivacyScore, AliasAdvice, InsightsDto,
+  Difficulty, DeletionInfo, TwoFactorInfo, CatalogInfo, OrgKind, Organization, Authority, HelpLink, AliasService,
+  ReferenceData, ProviderPreset, MailboxDraft, MailboxPatch, ImportDetection, ScreenshotEntry, ScreenshotReadPayload,
+  ScreenshotCommitResult, LetterKind, Party, LetterArgs, LetterPreview, NewRequest, RequestUpdate, JobKind, JobItem,
+  JobProgress, JobDone, RunningJob, ScanDonePayload, ImportDonePayload, UnsubscribeDonePayload, ClassifyDonePayload,
+  BreachDonePayload, CatalogRefreshDonePayload, VaultStatus, AiModels,
+} from "./ipc";
 
-export type UnsubscribeMethod =
-  | { OneClick: { url: string } }
-  | { Mailto: { address: string; subject: string | null; body: string | null } }
-  | { Link: { url: string } };
+export type Snapshot = SnapshotDto;
+export type Settings = SettingsDto;
+export type Mailbox = MailboxDto;
 
-export type MailCategory = "Marketing" | "Newsletter" | "Social" | "Transactional" | "Spam" | "Unknown";
-export type CategorySource = "Rules" | "Ai" | "User";
-export type SubscriptionStatus = "Active" | "Keep" | "Unsubscribed" | "StillReceiving" | "Failed";
-
-export interface UnsubscribeAttempt {
-  at: IsoDate;
-  method: UnsubscribeMethod;
-  ok: boolean;
-  message: string;
-}
-
-export interface Subscription {
-  id: Uuid;
-  mailbox: string;
-  list_key: string;
-  domain: string;
-  name: string;
-  sender: string;
-  unsubscribe: UnsubscribeMethod[];
-  message_count: number;
-  frequency_per_month: number;
-  first_seen: IsoDate | null;
-  last_seen: IsoDate | null;
-  sample_subjects: string[];
-  category: MailCategory;
-  category_source: CategorySource;
-  status: SubscriptionStatus;
-  history: UnsubscribeAttempt[];
-}
-
-export type EvidenceKind =
-  | "Welcome" | "Verification" | "PasswordReset" | "LoginAlert" | "SsoGrant" | "SavedPassword"
-  | "DataExport" | "Breach" | "Receipt" | "Newsletter" | "OtherMail" | "Manual";
-
-export type PasswordFormat =
-  | "Chrome" | "Firefox" | "Safari" | "Edge" | "Bitwarden" | "OnePassword" | "KeePass"
-  | "LastPass" | "Proton" | "Dashlane" | "Generic";
-
-export type SourceKind =
-  | { Mail: { mailbox: string } }
-  | { PasswordExport: { format: PasswordFormat } }
-  | "GoogleTakeout"
-  | "FacebookExport"
-  | "GenericList"
-  | "GitHub"
-  | "HaveIBeenPwned"
-  | "Manual";
-
-export type SsoProvider =
-  | "Google" | "Apple" | "Microsoft" | "GitHub" | "Facebook" | "Discord" | "X" | "LinkedIn" | "Amazon"
-  | { Other: string };
-
-export type AccountStatus =
-  | "Discovered" | "Confirmed" | "Keep" | "DeletionPending" | "Deleted" | "NotAnAccount" | "Ignored";
-
-export type DeletionMethod =
-  | { DirectLink: { url: string } }
-  | { GdprEmail: { to: string } }
-  | { SsoRevoked: { provider: SsoProvider } }
-  | "Confirmed"
-  | "Other";
-
-export interface DeletionStep {
-  at: IsoDate;
-  method: DeletionMethod;
-  note: string;
-  deadline: IsoDate | null;
-}
-
-export interface Evidence {
-  kind: EvidenceKind;
-  source: SourceKind;
-  summary: string;
-  date: IsoDate | null;
-  source_ref: string | null;
-}
-
-export interface Account {
-  id: Uuid;
-  domain: string;
-  name: string;
-  identifiers: string[];
-  sso: SsoProvider[];
-  evidence: Evidence[];
-  status: AccountStatus;
-  confidence: number;
-  first_seen: IsoDate | null;
-  last_seen: IsoDate | null;
-  tags: string[];
-  notes: string;
-  deletion: DeletionStep[];
-  created_at: IsoDate;
-  updated_at: IsoDate;
-}
-
-export interface SourceRun {
-  id: Uuid;
-  source: SourceKind;
-  started_at: IsoDate;
-  finished_at: IsoDate | null;
-  items_scanned: number;
-  findings: number;
-  new_accounts: number;
-  error: string | null;
-}
-
-export interface MailboxConfig {
-  id: Uuid;
-  address: string;
-  imap_host: string;
-  imap_port: number;
-  username: string;
-  /** Never sent to the UI by the real backend (redacted). */
-  password: string;
-  folders: string[];
-  progress: { folder: string; uid_validity: number; last_uid: number }[];
-  last_scan: IsoDate | null;
-}
-
-export type AiProvider = "Off" | "Ollama" | "Anthropic";
-
-export interface AiSettings {
-  provider: AiProvider;
-  ollama_url: string;
-  ollama_model: string;
-  anthropic_api_key: string;
-  anthropic_model: string;
-}
-
-export interface Settings {
-  auto_lock_minutes: number;
-  min_confidence: number;
-  full_name: string;
-  letter_language: "de" | "en";
-  allow_catalog_updates: boolean;
-  dark_mode: boolean;
-  ai: AiSettings;
-  fetch_logos: boolean;
-}
-
-/** What the UI holds after unlocking (VaultData minus secrets). */
-export interface Snapshot {
-  schema: number;
-  accounts: Account[];
-  runs: SourceRun[];
-  mailboxes: MailboxConfig[];
-  settings: Settings;
-  subscriptions: Subscription[];
-}
-
-// ---- helpers for the tagged unions ----
+// ---- tagged union helpers ----
 
 export function sourceTag(s: SourceKind): string {
   return typeof s === "string" ? s : Object.keys(s)[0]!;
@@ -175,6 +38,8 @@ export function methodTag(m: DeletionMethod): string {
   return typeof m === "string" ? m : Object.keys(m)[0]!;
 }
 
+// ---- German labels (no dashes, no hyphenated compounds) ----
+
 export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
   Discovered: "Neu entdeckt",
   Confirmed: "Bestätigt",
@@ -187,39 +52,44 @@ export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
 
 export const EVIDENCE_LABEL: Record<EvidenceKind, string> = {
   Welcome: "Willkommensmail",
-  Verification: "E-Mail-Bestätigung",
-  PasswordReset: "Passwort-Reset",
-  LoginAlert: "Login-Hinweis",
-  SsoGrant: "SSO-Verknüpfung",
+  Verification: "Mailbestätigung",
+  PasswordReset: "Passwort zurückgesetzt",
+  LoginAlert: "Anmeldehinweis",
+  SsoGrant: "Anmeldung über Drittanbieter",
   SavedPassword: "Gespeichertes Passwort",
   DataExport: "Datenexport",
   Breach: "Datenleck",
-  Receipt: "Bestellung/Rechnung",
+  Receipt: "Bestellung oder Rechnung",
   Newsletter: "Newsletter",
   OtherMail: "Sonstige Mail",
   Manual: "Manuell",
+  Payment: "Zahlung",
+  TwoFactor: "Zweiter Faktor",
+  Screenshot: "Screenshot",
 };
 
 export const PASSWORD_FORMAT_LABEL: Record<PasswordFormat, string> = {
-  Chrome: "Chrome", Firefox: "Firefox", Safari: "Safari / Apple Passwörter", Edge: "Edge",
+  Chrome: "Chrome", Firefox: "Firefox", Safari: "Apple Passwörter", Edge: "Edge",
   Bitwarden: "Bitwarden", OnePassword: "1Password", KeePass: "KeePass", LastPass: "LastPass",
   Proton: "Proton Pass", Dashlane: "Dashlane", Generic: "CSV",
 };
 
 export function sourceLabel(s: SourceKind): string {
   if (typeof s === "string") {
-    return { GoogleTakeout: "Google Takeout", FacebookExport: "Facebook-Export", GenericList: "Liste",
+    return { GoogleTakeout: "Google Takeout", FacebookExport: "Facebook Export", GenericList: "Liste",
       GitHub: "GitHub", HaveIBeenPwned: "Have I Been Pwned", Manual: "Manuell" }[s];
   }
-  if ("Mail" in s) return `Postfach ${s.Mail.mailbox}`;
-  return `Passwörter (${PASSWORD_FORMAT_LABEL[s.PasswordExport.format]})`;
+  if ("Mail" in s) return s.Mail.mailbox;
+  if ("Screenshot" in s) return s.Screenshot.provider ? `Screenshot ${ssoLabel(s.Screenshot.provider)}` : "Screenshot";
+  return `Passwörter ${PASSWORD_FORMAT_LABEL[s.PasswordExport.format]}`;
 }
 
 /** Short source group label for filters. */
 export function sourceGroup(s: SourceKind): string {
   if (typeof s === "string") return sourceLabel(s);
   if ("Mail" in s) return "Postfach";
-  return "Passwort-Export";
+  if ("Screenshot" in s) return "Screenshot";
+  return "Passwortexport";
 }
 
 export const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
@@ -227,9 +97,75 @@ export const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
   StillReceiving: "Kommt trotzdem", Failed: "Fehlgeschlagen",
 };
 export const MAIL_CATEGORY_LABEL: Record<MailCategory, string> = {
-  Marketing: "Werbung", Newsletter: "Newsletter", Social: "Social",
-  Transactional: "Wichtig/Transaktional", Spam: "Spam", Unknown: "Unbekannt",
+  Marketing: "Werbung", Newsletter: "Newsletter", Social: "Soziale Netze",
+  Transactional: "Wichtig", Spam: "Spam", Unknown: "Unbekannt",
 };
+
+export const DIFFICULTY_LABEL: Record<Difficulty, { label: string; dot: string }> = {
+  Easy: { label: "Einfach", dot: "bg-s-green" },
+  Medium: { label: "Mittel", dot: "bg-s-yellow" },
+  Hard: { label: "Aufwendig", dot: "bg-s-red" },
+  Impossible: { label: "Nur per Brief", dot: "bg-s-red" },
+  Unknown: { label: "Unbekannt", dot: "bg-s-gray" },
+};
+
+export const LETTER_LABEL: Record<LetterKind, string> = {
+  Erasure: "Löschantrag",
+  Access: "Auskunft",
+  ObjectionAndAccess: "Widerspruch und Auskunft",
+  Cancellation: "Kündigung",
+  CeaseAndDesist: "Unterlassung",
+  CreditBureauAccess: "Selbstauskunft",
+  AddressBrokerObjection: "Werbewiderspruch",
+  Complaint: "Beschwerde",
+  Reminder: "Erinnerung",
+};
+
+export const REQUEST_KIND_LABEL: Record<RequestKind, string> = {
+  Erasure: "Löschantrag",
+  Access: "Auskunft",
+  Objection: "Widerspruch",
+  Cancellation: "Kündigung",
+  CeaseAndDesist: "Unterlassung",
+  Complaint: "Beschwerde",
+  Reminder: "Erinnerung",
+  CreditBureauAccess: "Selbstauskunft",
+  AdvertisingObjection: "Werbewiderspruch",
+};
+
+export const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
+  Draft: "Entwurf", Sent: "Gesendet", Answered: "Beantwortet", Done: "Erledigt", Rejected: "Abgelehnt",
+};
+
+export const INTERVAL_LABEL: Record<BillingInterval, string> = {
+  Weekly: "wöchentlich", BiWeekly: "alle zwei Wochen", BiMonthly: "alle zwei Monate", FourMonthly: "alle vier Monate", Monthly: "monatlich", Quarterly: "vierteljährlich", HalfYearly: "halbjährlich", Yearly: "jährlich",
+};
+
+export const RISK_REASON_LABEL: Record<RiskReason, string> = {
+  PaymentDataStored: "Zahlungsdaten gespeichert",
+  ActiveSubscription: "Aktives Abo",
+  ServiceBreached: "Dienst hatte ein Datenleck",
+  IdentifierInBreach: "Deine Adresse ist in einem Leak",
+  PasswordPwned: "Passwort geleakt",
+  PasswordReused: "Passwort mehrfach genutzt",
+  No2faButSupported: "2FA fehlt",
+  InactiveForYears: "Seit Jahren ungenutzt",
+  PhoneLogin: "Anmeldung per Telefonnummer",
+  ForeignRecoveryAddress: "Fremde Wiederherstellungsadresse",
+  SsoLinked: "Über Drittanbieter angemeldet",
+};
+
+export function paymentMethodLabel(m: PaymentMethod): string {
+  if (typeof m === "string") {
+    return { PayPal: "PayPal", ApplePay: "Apple Pay", GooglePay: "Google Pay", AmazonPay: "Amazon Pay", Klarna: "Klarna", Invoice: "Rechnung" }[m];
+  }
+  if ("Card" in m) return `${m.Card.brand} •••• ${m.Card.last4}`;
+  if ("Sepa" in m) return m.Sepa.iban_last4 ? `Lastschrift •••• ${m.Sepa.iban_last4}` : "Lastschrift";
+  return m.Other;
+}
+export function paymentMethodKey(m: PaymentMethod): string {
+  return typeof m === "string" ? m : JSON.stringify(m);
+}
 
 export function connectionsUrl(p: SsoProvider): string | null {
   if (typeof p !== "string") return null;

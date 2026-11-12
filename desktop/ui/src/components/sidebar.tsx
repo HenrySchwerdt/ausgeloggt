@@ -2,7 +2,7 @@ import { Lock, Moon, Sun } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { href, useRoute } from "@/lib/router";
 import { cn } from "@/lib/utils";
-import { isHidden } from "@/lib/derive";
+import { isHidden, isLiveRequest } from "@/lib/derive";
 import { NAV } from "./nav";
 import { LogoMark, Dot } from "./common";
 import { platform } from "./titlebar";
@@ -15,15 +15,16 @@ export function Sidebar() {
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
   const lock = useStore((s) => s.lock);
+  const insights = useStore((s) => s.insights);
 
   const counts: Partial<Record<string, number>> = snap
     ? {
         accounts: snap.accounts.filter((a) => !isHidden(a)).length,
         newsletter: snap.subscriptions.filter((s) => s.status === "Active" || s.status === "StillReceiving").length,
-        deletions: snap.accounts.filter((a) => a.status === "DeletionPending").length,
-        sources: snap.runs.length ? new Set(snap.runs.map((r) => JSON.stringify(r.source))).size : 0,
+        requests: snap.requests.filter(isLiveRequest).length,
       }
     : {};
+  const overdue = insights?.overdue_requests.length ?? 0;
 
   return (
     <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar max-md:w-[196px]">
@@ -48,7 +49,7 @@ export function Sidebar() {
             >
               <Icon className={cn("size-4", active ? "text-fg" : "text-fg-muted")} strokeWidth={1.75} />
               <span className="flex-1">{label}</span>
-              {count ? <span className="tnum text-sm text-fg-faint">{count}</span> : null}
+              {page === "requests" && overdue > 0 ? <span className="flex items-center gap-1.5 text-sm text-fg-muted"><Dot className="bg-s-red" />{overdue}</span> : count ? <span className="tnum text-sm text-fg-faint">{count}</span> : null}
             </a>
           );
         })}

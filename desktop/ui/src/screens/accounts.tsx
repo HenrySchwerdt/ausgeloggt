@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useEffect, useMemo, useState } from "react";
 import { Check, EyeOff, Search, ShieldCheck, Trash2, UserX, Users, X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { navigate, useRoute } from "@/lib/router";
@@ -7,7 +6,7 @@ import { isHidden } from "@/lib/derive";
 import {
   ACCOUNT_STATUS_LABEL, sourceGroup, ssoKey, ssoLabel, type Account, type AccountStatus,
 } from "@/lib/types";
-import { cn, shortIdentifier } from "@/lib/utils";
+import { cn, nf, shortIdentifier } from "@/lib/utils";
 import { Dot, EmptyState, PageHeader, ServiceLogo, STATUS_COLOR } from "@/components/common";
 import { AccountDetail } from "@/components/account-detail";
 import { Button } from "@/components/ui/button";
@@ -15,6 +14,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FilterMenu } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
+import { VirtualList } from "@/components/virtual-list";
+import { confirm } from "@/components/confirm";
 
 type Filter = AccountStatus | "all" | "hidden";
 
@@ -38,6 +39,7 @@ export function AccountsPage() {
   const [source, setSource] = useState("all");
   const [sso, setSso] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [active, setActive] = useState(-1);
 
   const openId = route.page === "accounts" ? route.id : undefined;
   const open = snap.accounts.find((a) => a.id === openId);
@@ -76,7 +78,7 @@ export function AccountsPage() {
     return [
       { value: "all", label: "Alle" },
       { value: "none", label: "Ohne SSO" },
-      ...(hasRelay ? [{ value: "relay", label: "Apple-Relay-Adresse" }] : []),
+      ...(hasRelay ? [{ value: "relay", label: "Apple Relay" }] : []),
       ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
     ];
   }, [snap.accounts]);
@@ -101,15 +103,13 @@ export function AccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const virt = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: () => 44, overscan: 12 });
-
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someSelected = selected.size > 0 && !allSelected;
   const toggle = (id: string) =>
     setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const bulk = async (status: AccountStatus) => {
+    if (status === "DeletionPending" && !(await confirm({ title: `${selected.size} Accounts zum Löschen vormerken?`, text: "Die Accounts bleiben bestehen, bis du sie beim Anbieter gelöscht hast.", confirm: "Vormerken" }))) return;
     await setStatus([...selected], status);
     setSelected(new Set());
   };
@@ -122,7 +122,7 @@ export function AccountsPage() {
         <div className="flex flex-col gap-4 px-7 pb-3 pt-7">
           <PageHeader
             title="Accounts"
-            description={`${counts.all} Accounts${pending ? ` · ${pending} zu prüfen` : ""}`}
+            description={`${nf(counts.all)} Accounts${pending ? `, ${pending} zu prüfen` : ""}`}
           />
           <div className="flex min-w-0 flex-col gap-2.5">
             <div className="-mb-px max-w-full overflow-x-auto [scrollbar-width:none]">
@@ -166,67 +166,51 @@ export function AccountsPage() {
           <span className="hidden min-w-0 flex-1 basis-0 @[600px]:block">Kennung</span>
           <span className="hidden w-[116px] @[780px]:block">SSO</span>
           <span className="w-[116px]">Status</span>
-          <span className="w-[60px] text-right">Sicherheit</span>
+          <span className="w-[60px] text-right">Erkannt</span>
         </div>
 
         {rows.length === 0 ? (
-          <EmptyState icon={Users} title="Keine Accounts gefunden" description="Passe Filter oder Suche an." className="flex-1" />
+          snap.accounts.length === 0
+            ? <EmptyState icon={Users} title="Noch keine Accounts" description="Verbinde ein Postfach oder importiere einen Passwortexport." className="flex-1" action={<Button variant="primary" onClick={() => navigate({ page: "sources" })}>Quelle hinzufügen</Button>} />
+            : <EmptyState icon={Users} title="Keine Accounts gefunden" description="Passe Filter oder Suche an." className="flex-1" />
         ) : (
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-20">
-            <div style={{ height: virt.getTotalSize() }} className="relative w-full">
-              {virt.getVirtualItems().map((v) => {
-                const a = rows[v.index]!;
-                const isSel = selected.has(a.id);
-                const isOpen = a.id === openId;
-                return (
-                  <div
-                    key={a.id}
-                    style={{ transform: `translateY(${v.start}px)`, height: v.size }}
-                    className="absolute left-0 top-0 w-full"
-                  >
-                    <div
-                      role="row"
-                      onClick={() => navigate({ page: "accounts", id: a.id })}
-                      className={cn(
-                        "group flex h-full cursor-default items-center gap-3 border-b border-border px-7 transition-colors",
-                        isOpen || isSel ? "bg-muted" : "hover:bg-muted/60",
-                      )}
-                    >
-                      <Checkbox
-                        aria-label={`${a.name} auswählen`}
-                        checked={isSel}
-                        onClick={(e) => e.stopPropagation()}
-                        onCheckedChange={() => toggle(a.id)}
-                        className={cn(!isSel && selected.size === 0 && "opacity-0 group-hover:opacity-100")}
-                      />
-                      <ServiceLogo name={a.name} domain={a.domain} />
-                      <div className="min-w-0 flex-[1.15] basis-0">
-                        <div className="truncate text-base font-medium leading-[18px]">{a.name}</div>
-                        <div className="truncate text-sm leading-4 text-fg-faint">{a.domain}</div>
-                      </div>
-                      <div className="hidden min-w-0 flex-1 basis-0 @[600px]:block">
-                        <div className="truncate text-base text-fg-muted" title={a.identifiers[0]}>{a.identifiers[0] ? shortIdentifier(a.identifiers[0]) : "–"}</div>
-                        {a.identifiers.length > 1 && <div className="text-xs text-fg-faint">+{a.identifiers.length - 1} weitere</div>}
-                      </div>
-                      <div className="hidden w-[116px] shrink-0 items-center gap-1 @[780px]:flex">
-                        {a.sso.slice(0, 2).map((p) => (
-                          <span key={ssoKey(p)} className="rounded-[4px] bg-muted px-1.5 py-px text-xs text-fg-muted group-hover:bg-muted-hover">{ssoLabel(p)}</span>
-                        ))}
-                        {a.sso.length > 2 && <span className="text-xs text-fg-faint">+{a.sso.length - 2}</span>}
-                      </div>
-                      <div className="flex w-[116px] shrink-0 items-center gap-2 text-base text-fg-muted">
-                        <Dot className={STATUS_COLOR[a.status]} />
-                        <span className="truncate">{ACCOUNT_STATUS_LABEL[a.status]}</span>
-                      </div>
-                      <div className={cn("tnum w-[60px] text-right text-base", a.confidence < snap.settings.min_confidence ? "text-fg-faint" : "text-fg-muted")}>
-                        {Math.round(a.confidence * 100)}%
-                      </div>
-                    </div>
+          <VirtualList
+            items={rows} getKey={(a) => a.id} active={active} onActive={setActive} bottomPad={80}
+            onOpen={(a) => navigate({ page: "accounts", id: a.id })}
+            renderRow={(a, { active: act }) => {
+              const isSel = selected.has(a.id);
+              const isOpen = a.id === openId;
+              return (
+                <div
+                  role="row" onClick={() => { setActive(rows.indexOf(a)); navigate({ page: "accounts", id: a.id }); }}
+                  className={cn("group flex h-full cursor-default items-center gap-3 border-b border-border px-7 transition-colors", isOpen || isSel ? "bg-muted" : act ? "bg-muted/70" : "hover:bg-muted/60")}
+                >
+                  <Checkbox
+                    aria-label={`${a.name} auswählen`} checked={isSel} onClick={(e) => e.stopPropagation()} onCheckedChange={() => toggle(a.id)}
+                    className={cn(!isSel && selected.size === 0 && "opacity-0 group-hover:opacity-100")}
+                  />
+                  <ServiceLogo name={a.name} domain={a.domain} />
+                  <div className="min-w-0 flex-[1.15] basis-0">
+                    <div className="truncate text-base font-medium leading-[18px]" title={a.name}>{a.name}</div>
+                    <div className="truncate text-sm leading-4 text-fg-faint">{a.domain.startsWith("unresolved:") ? "Domain unbekannt" : a.domain}</div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                  <div className="hidden min-w-0 flex-1 basis-0 @[600px]:block">
+                    <div className="truncate text-base text-fg-muted" title={a.identifiers[0]}>{a.identifiers[0] ? shortIdentifier(a.identifiers[0]) : "–"}</div>
+                    {a.identifiers.length > 1 && <div className="text-xs text-fg-faint">+{a.identifiers.length - 1} weitere</div>}
+                  </div>
+                  <div className="hidden w-[116px] shrink-0 items-center gap-1 @[780px]:flex">
+                    {a.sso.slice(0, 2).map((p) => <span key={ssoKey(p)} className="rounded-[4px] bg-muted px-1.5 py-px text-xs text-fg-muted group-hover:bg-muted-hover">{ssoLabel(p)}</span>)}
+                    {a.sso.length > 2 && <span className="text-xs text-fg-faint">+{a.sso.length - 2}</span>}
+                  </div>
+                  <div className="flex w-[116px] shrink-0 items-center gap-2 text-base text-fg-muted">
+                    <Dot className={STATUS_COLOR[a.status]} />
+                    <span className="truncate">{ACCOUNT_STATUS_LABEL[a.status]}</span>
+                  </div>
+                  <div className={cn("tnum w-[60px] text-right text-base", a.confidence < snap.settings.min_confidence ? "text-fg-faint" : "text-fg-muted")}>{Math.round(a.confidence * 100)}%</div>
+                </div>
+              );
+            }}
+          />
         )}
 
         {selected.size > 0 && (
@@ -235,7 +219,7 @@ export function AccountsPage() {
             <span className="mx-1 h-4 w-px bg-border" />
             <Button variant="ghost" onClick={() => void bulk("Confirmed")}><Check /> Bestätigen</Button>
             <Button variant="ghost" onClick={() => void bulk("Keep")}><ShieldCheck /> Behalten</Button>
-            <Button variant="ghost" onClick={() => void bulk("DeletionPending")}><Trash2 /> Löschen</Button>
+            <Button variant="ghost" onClick={() => void bulk("DeletionPending")}><Trash2 /> Zum Löschen vormerken</Button>
             <Button variant="ghost" onClick={() => void bulk("NotAnAccount")}><UserX /> Kein Account</Button>
             <Button variant="ghost" onClick={() => void bulk("Ignored")}><EyeOff /> Ignorieren</Button>
             <span className="mx-1 h-4 w-px bg-border" />

@@ -161,3 +161,8 @@
 @media (prefers-reduced-motion: reduce) {
   .anim-fade, .anim-pop, .anim-slide-right, .anim-slide-up { animation: none; }
 }
+
+@keyframes indet {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}

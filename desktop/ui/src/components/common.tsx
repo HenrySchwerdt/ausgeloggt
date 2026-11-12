@@ -1,8 +1,10 @@
 import { useMemo } from "react";
-import type { LucideIcon } from "lucide-react";
+import { AlertCircle, RotateCw, type LucideIcon } from "lucide-react";
 import { brandPath } from "@/lib/brand";
+import { useLogo } from "@/lib/logos";
 import { cn } from "@/lib/utils";
 import type { AccountStatus, SubscriptionStatus } from "@/lib/types";
+import { Button } from "./ui/button";
 
 /* ---------- Logo mark (matches public/icon.svg and site/assets/brand/mark.svg) ---------- */
 export function LogoMark({ size = 20, className }: { size?: number; className?: string }) {
@@ -21,17 +23,20 @@ export function LogoMark({ size = 20, className }: { size?: number; className?: 
   );
 }
 
-/* ---------- Service logo ---------- */
+/* ---------- Service logo: bundled glyph, then favicon from the backend, then a letter ---------- */
 export function ServiceLogo({ name, domain, size = 24, className }: { name: string; domain: string; size?: number; className?: string }) {
   const path = useMemo(() => brandPath(name, domain), [name, domain]);
   const glyph = Math.round(size * 0.62);
+  const logo = useLogo(domain, !path);
   return (
     <span
       className={cn("flex shrink-0 select-none items-center justify-center rounded-md bg-muted text-fg-muted", className)}
       style={{ width: size, height: size }}
       aria-hidden
     >
-      {path ? (
+      {logo && !path ? (
+        <img src={logo} alt="" width={glyph} height={glyph} className="rounded-[3px] object-contain" draggable={false} />
+      ) : path ? (
         <svg width={glyph} height={glyph} viewBox="0 0 24 24" className="fill-fg">
           <path d={path} />
         </svg>
@@ -62,6 +67,10 @@ export function Dot({ className }: { className?: string }) {
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", className)} />;
 }
 
+export function riskDot(score: number): string {
+  return score >= 60 ? "bg-s-red" : score >= 30 ? "bg-s-yellow" : "bg-s-gray";
+}
+
 export function StatusLabel({ status, label, className }: { status: AccountStatus; label: string; className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-2 text-base text-fg-muted", className)}>
@@ -71,18 +80,28 @@ export function StatusLabel({ status, label, className }: { status: AccountStatu
   );
 }
 
-/* ---------- Empty state ---------- */
+/* ---------- Empty and error state ---------- */
 export function EmptyState({ icon: Icon, title, description, action, className }: {
   icon: LucideIcon; title: string; description?: string; action?: React.ReactNode; className?: string;
 }) {
   return (
     <div className={cn("flex flex-col items-center justify-center gap-3 px-6 py-16 text-center", className)}>
       <Icon className="size-8 text-fg-faint" strokeWidth={1.5} />
-      <div className="flex max-w-[360px] flex-col gap-1">
+      <div className="flex max-w-[380px] flex-col gap-1">
         <p className="text-lg font-medium text-fg">{title}</p>
         {description && <p className="text-base text-fg-muted">{description}</p>}
       </div>
       {action}
+    </div>
+  );
+}
+
+export function ErrorState({ message, onRetry, className }: { message: string; onRetry?: () => void; className?: string }) {
+  return (
+    <div className={cn("flex flex-col items-center justify-center gap-3 px-6 py-16 text-center", className)}>
+      <AlertCircle className="size-8 text-fg-faint" strokeWidth={1.5} />
+      <p className="max-w-[380px] text-base text-fg-muted">{message}</p>
+      {onRetry && <Button onClick={onRetry}><RotateCw /> Erneut versuchen</Button>}
     </div>
   );
 }
@@ -110,4 +129,20 @@ export function SectionLabel({ children, right, className }: { children: React.R
       {right}
     </div>
   );
+}
+
+/** Key figure: small label above a large number. */
+export function Figure({ label, value, hint, hintClass }: { label: string; value: React.ReactNode; hint?: React.ReactNode; hintClass?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-sm text-fg-muted">{label}</div>
+      <div className="tnum mt-1 text-2xl font-semibold tracking-[-0.02em]">{value}</div>
+      {hint !== undefined && <div className={cn("mt-0.5 min-h-4 text-sm text-fg-faint", hintClass)}>{hint}</div>}
+    </div>
+  );
+}
+
+/** Row used in simple lists (no per row borders besides hairlines). */
+export function ListRow({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex min-h-11 items-center gap-3 border-b border-border px-3 last:border-b-0", className)} {...p} />;
 }

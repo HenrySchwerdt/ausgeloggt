@@ -6,6 +6,7 @@ import { useRoute } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { PAGE_TITLE } from "./nav";
 import { Kbd } from "./ui/kbd";
+import { JobsIndicator } from "./jobs-indicator";
 
 export type Platform = "mac" | "win" | "linux";
 
@@ -75,6 +76,7 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
         )}
       </nav>
       <div data-tauri-drag-region className="flex-1 self-stretch" />
+      {!minimal && <JobsIndicator />}
       {!minimal && <button
         onClick={() => setPalette(true)}
         className="mr-2 flex h-6 w-[220px] items-center gap-2 rounded-md bg-muted px-2 text-base text-fg-faint transition-colors hover:bg-muted-hover max-md:w-6 max-md:justify-center max-md:px-0"

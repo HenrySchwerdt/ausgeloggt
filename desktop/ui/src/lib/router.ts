@@ -3,27 +3,40 @@ import { useSyncExternalStore } from "react";
 export type Route =
   | { page: "dashboard" }
   | { page: "accounts"; id?: string }
+  | { page: "cleanup"; tidy?: boolean }
   | { page: "newsletter" }
-  | { page: "deletions" }
+  | { page: "billing" }
+  | { page: "security" }
+  | { page: "requests" }
   | { page: "sources" }
-  | { page: "settings" };
+  | { page: "settings"; section?: string };
 
 export type Page = Route["page"];
 
 function parse(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  const parts = hash.replace(/^#\/?/, "").split("?")[0]!.split("/").filter(Boolean);
   switch (parts[0]) {
     case "accounts": return { page: "accounts", id: parts[1] };
+    case "cleanup": return { page: "cleanup", tidy: parts[1] === "tidy" };
     case "newsletter": return { page: "newsletter" };
-    case "deletions": return { page: "deletions" };
+    case "billing": return { page: "billing" };
+    case "security": return { page: "security" };
+    case "requests":
+    case "deletions": return { page: "requests" };
     case "sources": return { page: "sources" };
-    case "settings": return { page: "settings" };
+    case "settings": return { page: "settings", section: parts[1] };
     default: return { page: "dashboard" };
   }
 }
 
 export function href(r: Route): string {
-  return r.page === "dashboard" ? "#/" : r.page === "accounts" && r.id ? `#/accounts/${r.id}` : `#/${r.page}`;
+  switch (r.page) {
+    case "dashboard": return "#/";
+    case "accounts": return r.id ? `#/accounts/${r.id}` : "#/accounts";
+    case "cleanup": return r.tidy ? "#/cleanup/tidy" : "#/cleanup";
+    case "settings": return r.section ? `#/settings/${r.section}` : "#/settings";
+    default: return `#/${r.page}`;
+  }
 }
 
 export function navigate(r: Route) {

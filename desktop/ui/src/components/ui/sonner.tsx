@@ -10,6 +10,7 @@ export function Toaster() {
       gap={8}
       offset={20}
       visibleToasts={3}
+      icons={{ error: <span className="size-1.5 rounded-full bg-s-red" />, success: <span className="size-1.5 rounded-full bg-s-green" /> }}
       toastOptions={{
         style: {
           background: "var(--surface)", color: "var(--fg)", border: "1px solid var(--border)", borderRadius: "8px",

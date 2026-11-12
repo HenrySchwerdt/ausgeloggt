@@ -108,17 +108,20 @@ const R: Row[] = [
 
 const KIND_SUMMARY: Record<EvidenceKind, (n: string) => string> = {
   Welcome: (n) => `Willkommen bei ${n}`,
-  Verification: (n) => `Bitte bestätige deine E-Mail-Adresse (${n})`,
-  PasswordReset: (n) => `Passwort zurücksetzen – ${n}`,
+  Verification: (n) => `Bitte bestätige deine Mailadresse (${n})`,
+  PasswordReset: (n) => `Passwort zurücksetzen bei ${n}`,
   LoginAlert: (n) => `Neue Anmeldung bei deinem ${n}-Konto`,
   SsoGrant: (n) => `${n} wurde Zugriff auf dein Konto gewährt`,
   SavedPassword: (n) => `Gespeicherter Login für ${n}`,
   DataExport: (n) => `${n} im Datenexport gefunden`,
   Breach: (n) => `${n} in bekanntem Datenleck`,
-  Receipt: (n) => `Deine Bestellung bei ${n} – Rechnung`,
+  Receipt: (n) => `Deine Bestellung bei ${n}, Rechnung`,
   Newsletter: (n) => `${n} Newsletter: Angebote der Woche`,
   OtherMail: (n) => `Hinweis von ${n}`,
   Manual: (n) => `${n} manuell hinzugefügt`,
+  Payment: (n) => `Zahlung an ${n}`,
+  TwoFactor: (n) => `2FA bei ${n} aktiv`,
+  Screenshot: (n) => `${n} im Screenshot gefunden`,
 };
 
 function sourceFor(kind: EvidenceKind, src: SourceKind[]): SourceKind {
@@ -129,32 +132,19 @@ function sourceFor(kind: EvidenceKind, src: SourceKind[]): SourceKind {
   return find((s) => typeof s !== "string" && "Mail" in s) ?? src[0]!;
 }
 
-export interface CatalogInfo {
-  difficulty: "easy" | "medium" | "hard" | "impossible" | "unknown";
-  deletion_url: string | null;
-  contact_email: string | null;
-  note: string | null;
-}
-
 const HARD = new Set(["amazon.de", "adobe.com", "netflix.com", "linkedin.com", "x.com", "airbnb.de", "booking.com", "tumblr.com", "snapchat.com", "sky.de"]);
 const EASY = new Set(["spotify.com", "github.com", "discord.com", "zalando.de", "reddit.com", "notion.so", "duolingo.com", "figma.com", "twitch.tv", "canva.com", "strava.com", "medium.com", "etsy.com", "vinted.de"]);
-const NOTES: Record<string, string> = {
+export const NOTES: Record<string, string> = {
   "amazon.de": "Konto lässt sich nur über den Kundenservice schließen. Offene Bestellungen vorher abwarten.",
-  "adobe.com": "Löschung nur nach Kündigung aller Abos. Datenlöschung separat per Datenschutz-Anfrage.",
+  "adobe.com": "Löschung nur nach Kündigung aller Abos. Datenlöschung separat per Datenschutzanfrage.",
   "netflix.com": "Nur Kündigung online möglich, Löschung der Daten per Anfrage an den Datenschutz.",
   "x.com": "Konto wird 30 Tage deaktiviert und danach endgültig gelöscht.",
-  "linkedin.com": "Konto schließen unter Einstellungen > Kontoverwaltung. Löschung nach 24 Stunden.",
+  "linkedin.com": "Konto schließen unter Einstellungen, Kontoverwaltung. Löschung nach 24 Stunden.",
 };
-
-export function catalogFor(domain: string): CatalogInfo {
-  const difficulty = HARD.has(domain) ? "hard" : EASY.has(domain) ? "easy" : "medium";
-  return {
-    difficulty,
-    deletion_url: domain === "tumblr.com" ? null : `https://www.${domain}/account/delete`,
-    contact_email: `datenschutz@${domain}`,
-    note: NOTES[domain] ?? null,
-  };
+export function difficultyFor(domain: string): "Easy" | "Medium" | "Hard" {
+  return HARD.has(domain) ? "Hard" : EASY.has(domain) ? "Easy" : "Medium";
 }
+export const deletionUrl = (domain: string) => (domain === "tumblr.com" ? null : `https://www.${domain}/account/delete`);
 
 /** [days since the deletion started, GDPR letter sent?] */
 const PENDING: Record<string, [number, boolean]> = {
@@ -180,20 +170,21 @@ export function buildAccounts(): Account[] {
     const identifiers = [r.id];
     if (i % 9 === 0 && r.id !== W) identifiers.push(W);
     const deletion: DeletionStep[] = [];
-    const cat = catalogFor(r.d);
+    const cat = { deletion_url: deletionUrl(r.d), contact_email: `datenschutz@${r.d}` };
     if (r.s === "DeletionPending") {
       const [d0, gdpr] = PENDING[r.d] ?? [7, false];
       deletion.push({ at: ago(d0), method: { DirectLink: { url: cat.deletion_url ?? `https://${r.d}` } }, note: "Formular ausgefüllt, Bestätigung steht aus.", deadline: gdpr ? null : inDays(30 - d0) });
-      if (gdpr) deletion.push({ at: ago(d0 - 1), method: { GdprEmail: { to: cat.contact_email! } }, note: "DSGVO-Antrag nach Art. 17 versendet.", deadline: inDays(30 - d0 + 1) });
+      if (gdpr) deletion.push({ at: ago(d0 - 1), method: { GdprEmail: { to: cat.contact_email! } }, note: "Löschantrag nach Art. 17 versendet.", deadline: inDays(30 - d0 + 1) });
     }
     if (r.s === "Deleted") {
-      deletion.push({ at: ago(60), method: { GdprEmail: { to: cat.contact_email! } }, note: "DSGVO-Antrag versendet.", deadline: ago(30) });
-      deletion.push({ at: ago(41), method: "Confirmed", note: "Bestätigung per E-Mail erhalten.", deadline: null });
+      deletion.push({ at: ago(60), method: { GdprEmail: { to: cat.contact_email! } }, note: "Löschantrag versendet.", deadline: ago(30) });
+      deletion.push({ at: ago(41), method: "Confirmed", note: "Bestätigung per Mail erhalten.", deadline: null });
     }
     out.push({
       id: uuid(i + 1), domain: r.d, name: r.n, identifiers, sso: r.sso ?? [], evidence, status: r.s,
       confidence: r.conf, first_seen: first, last_seen: last, tags: r.tags ?? [], notes: r.note ?? "",
       deletion, created_at: first, updated_at: last,
+      payments: [], security: { password_reuse_count: null, password_pwned: null, has_2fa: null, phone_login: false, breaches: [], checked_at: null },
     });
   });
   return out;
@@ -244,7 +235,7 @@ export function buildSubscriptions(): Subscription[] {
     return {
       id: uuid(i + 1, "b"), mailbox, list_key: `news@${domain}`, domain, name, sender: `newsletter@${domain}`,
       unsubscribe, message_count: count, frequency_per_month: freq, first_seen: ago(count * 4), last_seen: ago(Math.floor(rnd() * 12) + 1),
-      sample_subjects: subjects, category, category_source: i % 4 === 0 ? "Ai" : "Rules", status, history: [],
+      sample_subjects: subjects, category, category_source: i % 4 === 0 ? "Ai" : "Rules", status, history: [], post_unsubscribe_mails: [],
     };
   });
 }
@@ -260,19 +251,3 @@ export function buildRuns(): SourceRun[] {
   ];
 }
 
-export interface GdprLetter { to: string; subject: string; body: string }
-
-export function gdprLetterText(a: Account, fullName: string, to: string, lang: "de" | "en" = "de"): GdprLetter {
-  const ident = a.identifiers.filter(Boolean).join(", ");
-  const today = new Date().toLocaleDateString("de-DE", { day: "2-digit", month: "long", year: "numeric" });
-  if (lang === "en") {
-    return {
-      to, subject: `Request for erasure of personal data (Art. 17 GDPR) – ${a.name}`,
-      body: `Dear Sir or Madam,\n\nI hereby request, pursuant to Article 17 GDPR, that you erase all personal data concerning me, including my customer account at ${a.name} (${a.domain}).\n\nAccount identifiers: ${ident}\n\nPlease confirm the erasure in writing within one month of receipt of this request (Art. 12(3) GDPR).\n\nKind regards\n${fullName}\n${today}`,
-    };
-  }
-  return {
-    to, subject: `Antrag auf Löschung personenbezogener Daten (Art. 17 DSGVO) – ${a.name}`,
-    body: `Sehr geehrte Damen und Herren,\n\nhiermit beantrage ich gemäß Art. 17 DSGVO die unverzügliche Löschung sämtlicher bei Ihnen gespeicherten personenbezogenen Daten, insbesondere meines Kundenkontos bei ${a.name} (${a.domain}).\n\nKennungen des Kontos: ${ident}\n\nBitte bestätigen Sie mir die vollständige Löschung innerhalb eines Monats nach Eingang dieses Schreibens schriftlich (Art. 12 Abs. 3 DSGVO).\n\nMit freundlichen Grüßen\n${fullName}\n${today}`,
-  };
-}
