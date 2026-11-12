@@ -1,0 +1,22 @@
+[package]
+name = "ausgeloggt-letters"
+description = "Briefe und PDF-Erzeugung (DIN 5008)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ausgeloggt-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+log.workspace = true
+printpdf = { version = "0.12", default-features = false }
+ttf-parser = "0.25"
+
+[dependencies.ausgeloggt-catalog]
+workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

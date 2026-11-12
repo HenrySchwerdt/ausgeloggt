@@ -35,7 +35,7 @@ function initialTheme(): Theme {
   const q = params.get("theme");
   if (q === "light" || q === "dark") return q;
   try {
-    const s = localStorage.getItem("spurlos-theme");
+    const s = localStorage.getItem("ausgeloggt-theme");
     if (s === "light" || s === "dark") return s;
   } catch { /* storage unavailable */ }
   return "dark";
@@ -94,7 +94,7 @@ export const useStore = create<State>((set, get) => ({
   },
   setTheme(t) {
     applyTheme(t);
-    try { localStorage.setItem("spurlos-theme", t); } catch { /* ignore */ }
+    try { localStorage.setItem("ausgeloggt-theme", t); } catch { /* ignore */ }
     set({ theme: t });
   },
   setPalette(open) { set({ paletteOpen: open }); },

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Spurlos",
+  "productName": "ausgeloggt",
   "version": "0.1.0",
-  "identifier": "app.spurlos.desktop",
+  "identifier": "io.github.henryschwerdt.ausgeloggt",
   "build": {
     "beforeDevCommand": { "script": "npm run dev", "cwd": "../ui" },
     "devUrl": "http://127.0.0.1:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Spurlos",
+        "title": "ausgeloggt",
         "width": 1280,
         "height": 820,
         "minWidth": 960,

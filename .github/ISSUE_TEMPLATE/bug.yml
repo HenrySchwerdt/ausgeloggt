@@ -1,0 +1,16 @@
+name: Fehler melden
+description: Etwas funktioniert nicht
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Was ist passiert?
+      description: Bitte nie echte persönliche Daten einfügen (Adressen, Mail-Inhalte, Passwörter).
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Schritte zum Nachstellen
+  - type: input
+    attributes:
+      label: Betriebssystem und App-Version

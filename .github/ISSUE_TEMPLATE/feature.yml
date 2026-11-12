@@ -1,0 +1,9 @@
+name: Idee vorschlagen
+description: Eine neue Funktion oder Verbesserung
+labels: [idee]
+body:
+  - type: textarea
+    attributes:
+      label: Was soll ausgeloggt können?
+    validations:
+      required: true

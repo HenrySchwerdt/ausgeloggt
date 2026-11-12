@@ -1,5 +1,5 @@
 /target
-*.spurlos
-*.spurlos.bak
+*.ausgeloggt
+*.ausgeloggt.bak
 .DS_Store
 /.cargo/config.toml

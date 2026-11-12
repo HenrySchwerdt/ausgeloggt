@@ -1,0 +1,17 @@
+[package]
+name = "ausgeloggt-ai"
+description = "Optionale KI-Klassifizierung (lokal per Ollama oder Anthropic API)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ausgeloggt-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+
+[dev-dependencies]
+uuid.workspace = true

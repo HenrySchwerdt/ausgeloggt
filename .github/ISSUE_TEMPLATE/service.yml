@@ -1,0 +1,20 @@
+name: Dienst / Lösch-Info
+description: Ein Dienst fehlt, oder Lösch-Link bzw. Schwierigkeit stimmen nicht
+labels: [katalog]
+body:
+  - type: input
+    attributes:
+      label: Dienst und Domain
+      placeholder: Beispiel GmbH, beispiel.de
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Link zur Löschseite
+  - type: dropdown
+    attributes:
+      label: Schwierigkeit
+      options: [Einfach, Mittel, Schwer, Nicht möglich, Unbekannt]
+  - type: textarea
+    attributes:
+      label: Hinweise (Schritte, Datenschutz-Kontakt, Postanschrift)

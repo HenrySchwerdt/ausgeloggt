@@ -29,7 +29,7 @@ export function Sidebar() {
     <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar max-md:w-[196px]">
       <div data-tauri-drag-region className={cn("flex h-9 shrink-0 items-center gap-2 px-4", platform === "mac" && "pl-[78px]")}>
         <LogoMark size={20} className="pointer-events-none" />
-        <span className="pointer-events-none text-lg font-semibold tracking-[-0.01em]">Spurlos</span>
+        <span className="pointer-events-none text-lg font-semibold tracking-[-0.01em]">ausgeloggt</span>
       </div>
 
       <nav className="mt-3 flex flex-col gap-0.5 px-2">

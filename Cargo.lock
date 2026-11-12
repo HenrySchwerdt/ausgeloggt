@@ -285,6 +285,136 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "ausgeloggt-ai"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-core",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "ausgeloggt-breach"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-core",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
+name = "ausgeloggt-catalog"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-core",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "ausgeloggt-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "chacha20poly1305",
+ "chrono",
+ "directories",
+ "getrandom 0.4.3",
+ "log",
+ "psl",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "ausgeloggt-desktop"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-ai",
+ "ausgeloggt-catalog",
+ "ausgeloggt-core",
+ "ausgeloggt-import",
+ "ausgeloggt-mail",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+]
+
+[[package]]
+name = "ausgeloggt-import"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-core",
+ "chrono",
+ "csv",
+ "getrandom 0.3.4",
+ "log",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zeroize",
+ "zip",
+]
+
+[[package]]
+name = "ausgeloggt-letters"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-catalog",
+ "ausgeloggt-core",
+ "chrono",
+ "log",
+ "printpdf",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ttf-parser",
+ "uuid",
+]
+
+[[package]]
+name = "ausgeloggt-mail"
+version = "0.1.0"
+dependencies = [
+ "ausgeloggt-core",
+ "chrono",
+ "lettre",
+ "log",
+ "mailparse",
+ "percent-encoding",
+ "regex",
+ "rustls",
+ "serde",
+ "thiserror 2.0.21",
+ "ureq",
+ "uuid",
+ "webpki-roots",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4026,136 +4156,6 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "spurlos-ai"
-version = "0.1.0"
-dependencies = [
- "log",
- "serde",
- "serde_json",
- "spurlos-core",
- "thiserror 2.0.21",
- "ureq",
- "uuid",
-]
-
-[[package]]
-name = "spurlos-breach"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "serde",
- "serde_json",
- "spurlos-core",
- "thiserror 2.0.21",
- "ureq",
-]
-
-[[package]]
-name = "spurlos-catalog"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "serde",
- "serde_json",
- "spurlos-core",
- "tempfile",
- "thiserror 2.0.21",
- "ureq",
- "uuid",
-]
-
-[[package]]
-name = "spurlos-core"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "chacha20poly1305",
- "chrono",
- "directories",
- "getrandom 0.4.3",
- "log",
- "psl",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "spurlos-desktop"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "spurlos-ai",
- "spurlos-catalog",
- "spurlos-core",
- "spurlos-import",
- "spurlos-mail",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
-]
-
-[[package]]
-name = "spurlos-import"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "csv",
- "getrandom 0.3.4",
- "log",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.11.1",
- "spurlos-core",
- "tempfile",
- "thiserror 2.0.21",
- "zeroize",
- "zip",
-]
-
-[[package]]
-name = "spurlos-letters"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "printpdf",
- "serde",
- "serde_json",
- "spurlos-catalog",
- "spurlos-core",
- "thiserror 2.0.21",
- "ttf-parser",
- "uuid",
-]
-
-[[package]]
-name = "spurlos-mail"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "lettre",
- "log",
- "mailparse",
- "percent-encoding",
- "regex",
- "rustls",
- "serde",
- "spurlos-core",
- "thiserror 2.0.21",
- "ureq",
- "uuid",
- "webpki-roots",
 ]
 
 [[package]]

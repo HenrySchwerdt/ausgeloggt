@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    spurlos_desktop_lib::run()
+    ausgeloggt_desktop_lib::run()
 }

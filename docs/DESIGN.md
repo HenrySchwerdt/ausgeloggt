@@ -1,4 +1,4 @@
-# Spurlos – Design-Spezifikation
+# ausgeloggt – Design-Spezifikation
 
 Vorbild: T3 Code, Linear, Vercel, shadcn/ui ("zinc"). Umsetzung mit Tailwind v4 + shadcn/ui: die Tokens unten sind CSS-Variablen. **Ruhig, flach, monochrom, präzise.**
 Farbe ist Information, keine Dekoration. Im Zweifel: weniger Rahmen, weniger Farbe, mehr Weißraum.
@@ -33,7 +33,7 @@ Farbe ist Information, keine Dekoration. Im Zweifel: weniger Rahmen, weniger Far
 
 ## Komponenten
 
-- **Sidebar** 220 px, Hintergrund `sidebar`, rechts 1-px-`border`. Oben Logo (20 px) + „Spurlos“ 14 px SemiBold.
+- **Sidebar** 220 px, Hintergrund `sidebar`, rechts 1-px-`border`. Oben Logo (20 px) + „ausgeloggt“ 14 px SemiBold.
   Nav-Einträge 30 px hoch, Icon 16 px `text_muted` + Label 13 px; Hover `muted`; aktiv `muted` + Text `text` + Icon `text`.
   **Kein** farbiger Balken, **keine** gefüllten Boxen pro Eintrag. Zähler rechts als 12 px `text_faint` Zahl (kein Badge).
   Unten: kleiner Tresor-Status (Punkt + „Entsperrt“), Theme-Umschalter und „Sperren“ als Ghost-Buttons.

@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/spurlos-core",
-    "crates/spurlos-import",
-    "crates/spurlos-mail",
-    "crates/spurlos-catalog",
-    "crates/spurlos-ai",
-    "crates/spurlos-breach",
-    "crates/spurlos-letters",
+    "crates/ausgeloggt-core",
+    "crates/ausgeloggt-import",
+    "crates/ausgeloggt-mail",
+    "crates/ausgeloggt-catalog",
+    "crates/ausgeloggt-ai",
+    "crates/ausgeloggt-breach",
+    "crates/ausgeloggt-letters",
     "desktop/src-tauri",
 ]
 
@@ -18,13 +18,13 @@ license = "MIT"
 rust-version = "1.85"
 
 [workspace.dependencies]
-spurlos-core = { path = "crates/spurlos-core" }
-spurlos-import = { path = "crates/spurlos-import" }
-spurlos-mail = { path = "crates/spurlos-mail" }
-spurlos-catalog = { path = "crates/spurlos-catalog" }
-spurlos-ai = { path = "crates/spurlos-ai" }
-spurlos-breach = { path = "crates/spurlos-breach" }
-spurlos-letters = { path = "crates/spurlos-letters" }
+ausgeloggt-core = { path = "crates/ausgeloggt-core" }
+ausgeloggt-import = { path = "crates/ausgeloggt-import" }
+ausgeloggt-mail = { path = "crates/ausgeloggt-mail" }
+ausgeloggt-catalog = { path = "crates/ausgeloggt-catalog" }
+ausgeloggt-ai = { path = "crates/ausgeloggt-ai" }
+ausgeloggt-breach = { path = "crates/ausgeloggt-breach" }
+ausgeloggt-letters = { path = "crates/ausgeloggt-letters" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }

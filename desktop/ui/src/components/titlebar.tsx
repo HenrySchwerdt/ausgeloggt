@@ -64,7 +64,7 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
   return (
     <header data-tauri-drag-region className="relative flex h-9 shrink-0 items-center border-b border-border bg-bg pl-4">
       <nav data-tauri-drag-region className={cn("pointer-events-none flex min-w-0 items-center gap-1.5 text-base", minimal && "invisible")}>
-        <span className="text-fg-faint">Spurlos</span>
+        <span className="text-fg-faint">ausgeloggt</span>
         <ChevronRight className="size-3 text-fg-faint" />
         <span className={cn("font-medium", account ? "text-fg-muted" : "text-fg")}>{PAGE_TITLE[route.page]}</span>
         {account && (

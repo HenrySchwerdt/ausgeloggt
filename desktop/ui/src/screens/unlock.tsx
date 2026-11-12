@@ -39,7 +39,7 @@ export function UnlockScreen() {
           <div className="flex flex-col items-center gap-4 text-center">
             <LogoMark size={44} />
             <div>
-              <h1 className="text-xl font-semibold tracking-[-0.01em]">{creating ? "Tresor erstellen" : "Spurlos entsperren"}</h1>
+              <h1 className="text-xl font-semibold tracking-[-0.01em]">{creating ? "Tresor erstellen" : "ausgeloggt entsperren"}</h1>
               <p className="mt-1 text-base text-fg-muted">
                 {creating ? "Wähle ein Master-Passwort. Es kann nicht wiederhergestellt werden." : "Gib dein Master-Passwort ein."}
               </p>

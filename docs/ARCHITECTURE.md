@@ -1,6 +1,6 @@
-# Spurlos – Architektur
+# ausgeloggt – Architektur
 
-Spurlos findet deine Online-Accounts (Postfach, Passwort-Manager, SSO, Datenexporte)
+ausgeloggt findet deine Online-Accounts (Postfach, Passwort-Manager, SSO, Datenexporte)
 und hilft beim Löschen (Direktlink, DSGVO-Antrag, Fristen-Tracking). Alles lokal,
 alles in einem verschlüsselten Tresor. Desktop-App mit **Tauri 2** (Rust-Backend + React/TypeScript/Tailwind-Oberfläche) für Windows, macOS und Linux.
 
@@ -8,16 +8,16 @@ alles in einem verschlüsselten Tresor. Desktop-App mit **Tauri 2** (Rust-Backen
 
 | Crate | Aufgabe |
 |---|---|
-| `crates/spurlos-core` | Datenmodell (`model.rs`, **der Vertrag zwischen allen Crates**), Domain-Normalisierung, Zusammenführung (`merge`), verschlüsselter Tresor (`vault`) |
-| `crates/spurlos-import` | Passwort-Exporte (Chrome, Firefox, Safari, Bitwarden, 1Password, KeePass …), Google Takeout, Facebook-Export, generische Listen → `Finding`s |
-| `crates/spurlos-mail` | IMAP-Scan (nur Header) + Klassifizierung (Willkommen, Verifizierung, Reset, Login-Alert, SSO-Grant, Newsletter …) → `Finding`s |
-| `crates/spurlos-catalog` | Lösch-Katalog (Link, Schwierigkeit, Kontakt) + DSGVO-Briefe (Art. 17), `mailto:`, Fristen |
-| `crates/spurlos-ai` | Optionale KI-Einordnung von Newslettern (Werbung/Newsletter/Spam/wichtig) und unsicheren Accounts, lokal per Ollama oder opt-in per Anthropic API |
+| `crates/ausgeloggt-core` | Datenmodell (`model.rs`, **der Vertrag zwischen allen Crates**), Domain-Normalisierung, Zusammenführung (`merge`), verschlüsselter Tresor (`vault`) |
+| `crates/ausgeloggt-import` | Passwort-Exporte (Chrome, Firefox, Safari, Bitwarden, 1Password, KeePass …), Google Takeout, Facebook-Export, generische Listen → `Finding`s |
+| `crates/ausgeloggt-mail` | IMAP-Scan (nur Header) + Klassifizierung (Willkommen, Verifizierung, Reset, Login-Alert, SSO-Grant, Newsletter …) → `Finding`s |
+| `crates/ausgeloggt-catalog` | Lösch-Katalog (Link, Schwierigkeit, Kontakt) + DSGVO-Briefe (Art. 17), `mailto:`, Fristen |
+| `crates/ausgeloggt-ai` | Optionale KI-Einordnung von Newslettern (Werbung/Newsletter/Spam/wichtig) und unsicheren Accounts, lokal per Ollama oder opt-in per Anthropic API |
 | `desktop/src-tauri` | Tauri-Shell: hält den entsperrten Tresor, stellt die Crates als typisierte IPC-Commands bereit, Hintergrund-Jobs mit Fortschritts-Events, Logo-Cache |
 | `desktop/ui` | Oberfläche: React + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide-react. Läuft auch im Browser mit Mock-API und Demo-Daten (für Screenshots/Design-Iteration) |
 
 Datenfluss: Quelle → `Vec<Finding>` → `merge::merge_findings(&mut VaultData, …)` → `Vault::save()`.
-Newsletter: Mail-Scan → `Vec<SubscriptionObservation>` → `merge::merge_subscriptions` → optional `spurlos_ai::classify_subscriptions` → Abmelden über `spurlos_mail::unsubscribe` (nur One-Click-POST und mailto automatisch, reine Links nur per Klick im Browser).
+Newsletter: Mail-Scan → `Vec<SubscriptionObservation>` → `merge::merge_subscriptions` → optional `ausgeloggt_ai::classify_subscriptions` → Abmelden über `ausgeloggt_mail::unsubscribe` (nur One-Click-POST und mailto automatisch, reine Links nur per Klick im Browser).
 
 ## Regeln für alle Beiträge
 

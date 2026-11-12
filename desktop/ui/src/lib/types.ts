@@ -1,4 +1,4 @@
-// Mirrors crates/spurlos-core/src/model.rs (serde default representation).
+// Mirrors crates/ausgeloggt-core/src/model.rs (serde default representation).
 // Unit variants -> string, struct/newtype variants -> { Variant: payload }.
 
 export type Uuid = string;
