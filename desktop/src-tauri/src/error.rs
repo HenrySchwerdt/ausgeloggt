@@ -61,7 +61,9 @@ impl From<ausgeloggt_core::vault::VaultError> for IpcError {
         use ausgeloggt_core::vault::VaultError as V;
         let code = match &e {
             V::WrongPasswordOrCorrupt => ErrorCode::WrongPassword,
-            V::NotAVault | V::UnsupportedVersion(_) | V::AlreadyExists => ErrorCode::Invalid,
+            V::NotAVault | V::UnsupportedVersion(_) | V::NewerSchema(_) | V::AlreadyExists => {
+                ErrorCode::Invalid
+            }
             V::Io(_) => ErrorCode::Io,
             V::Serde(_) | V::Crypto(_) => ErrorCode::Internal,
         };
@@ -91,7 +93,7 @@ impl From<ausgeloggt_mail::unsubscribe::UnsubscribeError> for IpcError {
     fn from(e: ausgeloggt_mail::unsubscribe::UnsubscribeError) -> Self {
         use ausgeloggt_mail::unsubscribe::UnsubscribeError as U;
         let code = match &e {
-            U::NoAutomaticMethod | U::Refused => ErrorCode::Invalid,
+            U::NoAutomaticMethod | U::Refused | U::UnsafeTarget => ErrorCode::Invalid,
             U::Http(_) | U::Network(_) | U::Smtp(_) => ErrorCode::Network,
         };
         Self::new(code, e.to_string())

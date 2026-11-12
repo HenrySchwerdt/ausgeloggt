@@ -21,6 +21,9 @@ pub enum UnsubscribeError {
     Http(u16),
     #[error("Netzwerkfehler: {0}")]
     Network(String),
+    /// The one-click target is local, private or otherwise not a public web server.
+    #[error("Abmeldelink zeigt auf ein lokales oder privates Netz und wird nicht aufgerufen")]
+    UnsafeTarget,
     #[error("Mailversand fehlgeschlagen: {0}")]
     Smtp(String),
     /// The subscription is categorised as transactional (receipts, account mails).
@@ -116,6 +119,9 @@ pub fn unsubscribe(
 fn one_click(url: &str) -> Result<String, UnsubscribeError> {
     if !starts_with_ci(url, "https://") {
         return Err(UnsubscribeError::NoAutomaticMethod);
+    }
+    if !is_public_https_target(url) {
+        return Err(UnsubscribeError::UnsafeTarget);
     }
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
@@ -618,9 +624,9 @@ mod tests {
 
     #[test]
     fn one_click_unreachable_is_network_error() {
-        // Port 1 on loopback: connection refused immediately.
+        // Loopback is never contacted.
         let r = one_click("https://127.0.0.1:1/unsub");
-        assert!(matches!(r, Err(UnsubscribeError::Network(_))), "{r:?}");
+        assert!(matches!(r, Err(UnsubscribeError::UnsafeTarget)), "{r:?}");
     }
 
     #[test]
@@ -674,5 +680,121 @@ mod tests {
             }
         );
         assert!(smtp_for(&cfg("broken", "mail.firma.example")).is_none());
+    }
+}
+
+/// SSRF guard for automated one-click POSTs: only public hosts. Rejects IP literals in
+/// loopback/private/link-local/CGNAT/unique-local ranges, `localhost` and internal
+/// TLDs, and host names that resolve to such addresses.
+pub(crate) fn is_public_https_target(url: &str) -> bool {
+    use std::net::{IpAddr, ToSocketAddrs};
+    let rest = &url["https://".len().min(url.len())..];
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let hostport = authority.rsplit('@').next().unwrap_or("");
+    let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
+        match v6.split_once(']') {
+            Some((h, p)) => (
+                h,
+                p.strip_prefix(':')
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(443),
+            ),
+            None => return false,
+        }
+    } else {
+        match hostport.rsplit_once(':') {
+            Some((h, p)) => match p.parse::<u16>() {
+                Ok(p) => (h, p),
+                Err(_) => return false,
+            },
+            None => (hostport, 443),
+        }
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty()
+        || host == "localhost"
+        || !host.contains('.') && host.parse::<IpAddr>().is_err()
+    {
+        return false;
+    }
+    for tld in [
+        ".localhost",
+        ".local",
+        ".internal",
+        ".lan",
+        ".home",
+        ".corp",
+        ".intranet",
+    ] {
+        if host.ends_with(tld) {
+            return false;
+        }
+    }
+    let is_public = |ip: IpAddr| match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || o[0] == 0
+                || (o[0] == 100 && (64..=127).contains(&o[1])))
+        }
+        IpAddr::V6(v6) => {
+            let seg = v6.segments();
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return !(v4.is_loopback() || v4.is_private() || v4.is_link_local());
+            }
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || (seg[0] & 0xfe00) == 0xfc00
+                || (seg[0] & 0xffc0) == 0xfe80)
+        }
+    };
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_public(ip);
+    }
+    match (host.as_str(), port).to_socket_addrs() {
+        Ok(addrs) => {
+            let addrs: Vec<_> = addrs.collect();
+            !addrs.is_empty() && addrs.iter().all(|a| is_public(a.ip()))
+        }
+        // Unresolvable: let the request fail normally as a network error.
+        Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod ssrf_tests {
+    use super::is_public_https_target as ok;
+
+    #[test]
+    fn rejects_local_and_private_targets() {
+        for u in [
+            "https://127.0.0.1/x",
+            "https://localhost/x",
+            "https://[::1]/x",
+            "https://192.168.0.1:8443/x",
+            "https://10.1.2.3/x",
+            "https://172.16.0.9/x",
+            "https://169.254.169.254/latest/meta-data",
+            "https://100.64.0.1/x",
+            "https://[fd00::1]/x",
+            "https://[fe80::1]/x",
+            "https://printer.local/x",
+            "https://router.lan/x",
+            "https://intranet/x",
+            "https://user@127.0.0.1/x",
+        ] {
+            assert!(!ok(u), "{u} must be rejected");
+        }
+    }
+
+    #[test]
+    fn accepts_public_literals() {
+        assert!(ok("https://93.184.215.14/unsub"));
+        assert!(ok("https://[2606:2800:21f:cb07:6820:80da:af6b:8b2c]/u"));
     }
 }

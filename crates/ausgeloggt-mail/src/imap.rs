@@ -248,7 +248,7 @@ pub(crate) fn parse_list(u: &Untagged) -> Option<Folder> {
     // Hierarchy delimiter: quoted char or NIL.
     if rest.starts_with('"') {
         rest = unquote(rest)?.1.trim_start();
-    } else if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case("NIL") {
+    } else if rest.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("NIL")) {
         rest = rest[3..].trim_start();
     } else {
         return None;
@@ -453,7 +453,7 @@ impl Client {
                     status: rest.to_string(),
                 });
             } else if let Some(rest) = first.strip_prefix("* ") {
-                if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case("BYE") {
+                if rest.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("BYE")) {
                     return Err(MailError::Imap(
                         "Der Server hat die Verbindung beendet".into(),
                     ));
@@ -470,7 +470,10 @@ impl Client {
         for u in &reply.untagged {
             let t = u.text();
             if let Some(rest) = t.strip_prefix("* ") {
-                if rest.len() >= 10 && rest[..10].eq_ignore_ascii_case("CAPABILITY") {
+                if rest
+                    .get(..10)
+                    .is_some_and(|p| p.eq_ignore_ascii_case("CAPABILITY"))
+                {
                     caps.extend(
                         rest[10..]
                             .split_whitespace()
@@ -558,7 +561,10 @@ impl Client {
         for u in &reply.untagged {
             let t = u.text();
             if let Some(rest) = t.strip_prefix("* ") {
-                if rest.len() >= 6 && rest[..6].eq_ignore_ascii_case("SEARCH") {
+                if rest
+                    .get(..6)
+                    .is_some_and(|p| p.eq_ignore_ascii_case("SEARCH"))
+                {
                     uids.extend(
                         rest[6..]
                             .split_whitespace()

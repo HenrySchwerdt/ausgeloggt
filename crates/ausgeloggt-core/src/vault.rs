@@ -35,6 +35,8 @@ pub enum VaultError {
     NotAVault,
     #[error("Tresor-Version {0} wird nicht unterstützt")]
     UnsupportedVersion(u8),
+    #[error("Dieser Tresor wurde mit einer neueren Version von ausgeloggt gespeichert (Schema {0}). Bitte aktualisiere die App.")]
+    NewerSchema(u32),
     #[error("Datei existiert bereits")]
     AlreadyExists,
     #[error("Ein-/Ausgabefehler: {0}")]
@@ -49,6 +51,8 @@ const MAGIC: &[u8; 8] = b"AUSGLOGT";
 const FORMAT_VERSION: u8 = 1;
 const HEADER_LEN: usize = 8 + 1 + 4 + 4 + 4 + 16 + 24;
 const TAG_LEN: usize = 16;
+/// 256 MiB: four times the default memory cost.
+const MAX_M_COST_KIB: u32 = 256 * 1024;
 
 /// Argon2id cost parameters (stored in the file header).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,9 +71,11 @@ impl KdfParams {
 
     /// Reject absurd values from a (possibly hostile) header before allocating memory.
     fn sane(&self) -> bool {
-        (8..=4 * 1024 * 1024).contains(&self.m_cost_kib)
-            && (1..=64).contains(&self.t_cost)
-            && (1..=64).contains(&self.p_cost)
+        // Upper bounds are a few times the defaults: enough headroom for stronger
+        // settings, small enough that a corrupted header cannot exhaust memory/time.
+        (8..=MAX_M_COST_KIB).contains(&self.m_cost_kib)
+            && (1..=16).contains(&self.t_cost)
+            && (1..=8).contains(&self.p_cost)
     }
 }
 
@@ -93,6 +99,10 @@ fn derive_key(
     salt: &[u8; 16],
     p: KdfParams,
 ) -> Result<Zeroizing<[u8; 32]>, VaultError> {
+    // NFC: macOS input methods may produce decomposed (NFD) text, Windows composed.
+    use unicode_normalization::UnicodeNormalization;
+    let password: Zeroizing<String> = Zeroizing::new(password.nfc().collect());
+    let password = password.as_str();
     let params = Params::new(p.m_cost_kib, p.t_cost, p.p_cost, Some(32))
         .map_err(|e| VaultError::Crypto(e.to_string()))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -193,6 +203,9 @@ impl Vault {
             .map_err(|_| VaultError::WrongPasswordOrCorrupt)?;
         let plain = Zeroizing::new(plain);
         let data: VaultData = serde_json::from_slice(&plain)?;
+        if data.schema > SCHEMA_VERSION {
+            return Err(VaultError::NewerSchema(data.schema));
+        }
         Ok(Vault {
             path: path.to_path_buf(),
             data,
@@ -256,6 +269,15 @@ impl Vault {
             self.salt = old_salt;
             self.key = old_key;
             return Err(e);
+        }
+        // save() rotated the previous file (old password) into the .bak; replace it
+        // with a copy under the new password so the old one no longer opens anything.
+        let bak = sibling(&self.path, "bak");
+        if bak.exists() {
+            if let Err(e) = fs::copy(&self.path, &bak) {
+                log::warn!("Sicherungskopie konnte nicht ersetzt werden: {e}");
+                let _ = fs::remove_file(&bak);
+            }
         }
         Ok(())
     }
