@@ -378,7 +378,9 @@ pub enum SourceKind {
     HaveIBeenPwned,
     Manual,
     /// Screenshot of an SSO / connected-apps list, read by a (local) vision model.
-    Screenshot { provider: Option<SsoProvider> },
+    Screenshot {
+        provider: Option<SsoProvider>,
+    },
 }
 
 impl SourceKind {
@@ -783,9 +785,14 @@ impl PaymentKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PaymentMethod {
     /// `brand`: Visa, Mastercard, Amex, Maestro, ...; `last4`: exactly 4 digits.
-    Card { brand: String, last4: String },
+    Card {
+        brand: String,
+        last4: String,
+    },
     PayPal,
-    Sepa { iban_last4: Option<String> },
+    Sepa {
+        iban_last4: Option<String>,
+    },
     ApplePay,
     GooglePay,
     AmazonPay,
@@ -799,7 +806,9 @@ impl PaymentMethod {
         match self {
             PaymentMethod::Card { brand, last4 } => format!("{brand} •••• {last4}"),
             PaymentMethod::PayPal => "PayPal".into(),
-            PaymentMethod::Sepa { iban_last4: Some(l) } => format!("Lastschrift •••• {l}"),
+            PaymentMethod::Sepa {
+                iban_last4: Some(l),
+            } => format!("Lastschrift •••• {l}"),
             PaymentMethod::Sepa { iban_last4: None } => "Lastschrift".into(),
             PaymentMethod::ApplePay => "Apple Pay".into(),
             PaymentMethod::GooglePay => "Google Pay".into(),

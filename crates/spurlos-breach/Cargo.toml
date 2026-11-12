@@ -12,3 +12,4 @@ serde_json.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 log.workspace = true
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }

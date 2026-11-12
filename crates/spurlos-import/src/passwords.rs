@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 use spurlos_core::{Evidence, EvidenceKind, Finding, PasswordFormat, SourceKind};
+use zeroize::Zeroizing;
 
 use crate::util::{host_of, parse_ts, source_ref};
 use crate::{ImportError, ImportResult};
@@ -17,6 +18,15 @@ pub(crate) enum CsvKind {
     Passwords(PasswordFormat),
     /// CSV with a URL-ish column but no password column.
     List,
+}
+
+/// One login row handed to the audit. The password lives only in a zeroizing buffer;
+/// the type deliberately has no `Debug` impl.
+pub(crate) struct PwRow {
+    pub domain: String,
+    pub identifier: Option<String>,
+    pub password: Zeroizing<String>,
+    pub has_totp: bool,
 }
 
 /// How findings from a table are labelled.
@@ -77,6 +87,10 @@ struct Layout {
     /// KeePass group column (recycle bin rows are skipped).
     group: Option<usize>,
     split_commas: bool,
+    /// Password column (read only transiently for the audit).
+    pass: Option<usize>,
+    /// TOTP / OTP columns (only checked for non-emptiness).
+    totp: Vec<usize>,
 }
 
 fn all_cols(h: &[String], names: &[&str]) -> Vec<usize> {
@@ -179,6 +193,8 @@ fn layout_for(kind: CsvKind, h: &[String]) -> Layout {
         kind: None,
         group: None,
         split_commas: false,
+        pass: first_col(h, &["password", "login_password", "pass", "pwd"]),
+        totp: all_cols(h, &["login_totp", "totp", "otpauth", "otpsecret", "otp"]),
     };
     match kind {
         CsvKind::Passwords(F::Firefox) => {
@@ -268,6 +284,15 @@ pub(crate) fn import_passwords(
     text: &str,
     as_format: Option<PasswordFormat>,
 ) -> Result<ImportResult, ImportError> {
+    import_passwords_audit(text, as_format, None)
+}
+
+/// Like [`import_passwords`], additionally handing each login row to `audit`.
+pub(crate) fn import_passwords_audit(
+    text: &str,
+    as_format: Option<PasswordFormat>,
+    audit: Option<&mut Vec<PwRow>>,
+) -> Result<ImportResult, ImportError> {
     let (rdr, headers) = open(text)?;
     let kind = sniff_headers(&headers).ok_or(ImportError::UnknownFormat)?;
     let ctx = match kind {
@@ -277,7 +302,7 @@ pub(crate) fn import_passwords(
         CsvKind::Passwords(f) => Ctx::Passwords(f),
         CsvKind::List => Ctx::Passwords(PasswordFormat::Generic),
     };
-    Ok(run(rdr, &headers, kind, &ctx))
+    Ok(run(rdr, &headers, kind, &ctx, audit))
 }
 
 /// Import a CSV list (URL / domain column) as `GenericList`.
@@ -286,10 +311,16 @@ pub(crate) fn import_list_csv(text: &str) -> Result<ImportResult, ImportError> {
     if first_col(&headers, GENERIC_URL).is_none() {
         return Err(ImportError::UnknownFormat);
     }
-    Ok(run(rdr, &headers, CsvKind::List, &Ctx::List))
+    Ok(run(rdr, &headers, CsvKind::List, &Ctx::List, None))
 }
 
-fn run(mut rdr: csv::Reader<&[u8]>, headers: &[String], kind: CsvKind, ctx: &Ctx) -> ImportResult {
+fn run(
+    mut rdr: csv::Reader<&[u8]>,
+    headers: &[String],
+    kind: CsvKind,
+    ctx: &Ctx,
+    mut audit: Option<&mut Vec<PwRow>>,
+) -> ImportResult {
     let layout = layout_for(kind, headers);
     let mut out = Collector::new(ctx);
     let mut scanned = 0u64;
@@ -345,8 +376,24 @@ fn run(mut rdr: csv::Reader<&[u8]>, headers: &[String], kind: CsvKind, ctx: &Ctx
         let name = layout.name.map(cell).filter(|s| !s.is_empty());
         let user = layout.user.iter().map(|&i| cell(i)).find(|s| !s.is_empty());
         let date = layout.date.iter().find_map(|&i| parse_ts(cell(i)));
+        let password = layout
+            .pass
+            .map(cell)
+            .filter(|s| !s.is_empty())
+            .map(|s| Zeroizing::new(s.to_string()));
+        let has_totp = layout.totp.iter().any(|&i| !cell(i).is_empty());
         for h in hosts {
-            out.push(h, name, user, date);
+            let domain = h.clone();
+            if out.push(h, name, user, date) {
+                if let (Some(a), Some(p)) = (audit.as_deref_mut(), password.as_ref()) {
+                    a.push(PwRow {
+                        domain,
+                        identifier: user.map(str::to_string),
+                        password: p.clone(),
+                        has_totp,
+                    });
+                }
+            }
         }
     }
     let mut warnings = Vec::new();
@@ -392,10 +439,10 @@ impl<'a> Collector<'a> {
         name: Option<&str>,
         user: Option<&str>,
         date: Option<chrono::DateTime<chrono::Utc>>,
-    ) {
+    ) -> bool {
         let r = source_ref(&[self.ctx.tag(), self.ctx.label(), &host, user.unwrap_or("")]);
         if !self.seen.insert(r.clone()) {
-            return;
+            return false;
         }
         self.findings.push(Finding {
             domain: host,
@@ -410,6 +457,7 @@ impl<'a> Collector<'a> {
                 source_ref: Some(r),
             },
         });
+        true
     }
 
     fn finish(self, scanned: u64, warnings: Vec<String>) -> ImportResult {
@@ -424,6 +472,13 @@ impl<'a> Collector<'a> {
 
 /// Import an unencrypted Bitwarden JSON export.
 pub(crate) fn import_bitwarden_json(json: &str) -> Result<ImportResult, ImportError> {
+    import_bitwarden_json_audit(json, None)
+}
+
+pub(crate) fn import_bitwarden_json_audit(
+    json: &str,
+    mut audit: Option<&mut Vec<PwRow>>,
+) -> Result<ImportResult, ImportError> {
     let json = json.strip_prefix('\u{feff}').unwrap_or(json);
     let v: Value =
         serde_json::from_str(json).map_err(|e| ImportError::Invalid(format!("JSON: {e}")))?;
@@ -474,8 +529,27 @@ pub(crate) fn import_bitwarden_json(json: &str) -> Result<ImportResult, ImportEr
             no_url += 1;
             continue;
         }
+        let password = login
+            .and_then(|l| l.get("password"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(|s| Zeroizing::new(s.to_string()));
+        let has_totp = login
+            .and_then(|l| l.get("totp"))
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty());
         for h in hosts {
-            out.push(h, name, user, date);
+            let domain = h.clone();
+            if out.push(h, name, user, date) {
+                if let (Some(a), Some(p)) = (audit.as_deref_mut(), password.as_ref()) {
+                    a.push(PwRow {
+                        domain,
+                        identifier: user.map(str::to_string),
+                        password: p.clone(),
+                        has_totp,
+                    });
+                }
+            }
         }
     }
     let mut warnings = Vec::new();

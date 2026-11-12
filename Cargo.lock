@@ -4136,6 +4136,7 @@ dependencies = [
  "spurlos-core",
  "thiserror 2.0.21",
  "ttf-parser",
+ "uuid",
 ]
 
 [[package]]

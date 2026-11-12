@@ -5,8 +5,8 @@
 //! app name is in the body. Nothing is sent anywhere except the user's IMAP server.
 
 pub mod classify;
-pub mod receipts;
 mod imap;
+pub mod receipts;
 pub mod unsubscribe;
 
 use std::collections::{HashMap, HashSet};
@@ -15,8 +15,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::{DateTime, Utc};
 use mailparse::MailHeaderMap;
 use spurlos_core::{
-    Evidence, EvidenceKind, Finding, FolderProgress, MailCategory, MailboxConfig, SourceKind,
-    PaymentObservation, SubscriptionObservation, UnsubscribeMethod,
+    Evidence, EvidenceKind, Finding, FolderProgress, MailCategory, MailRef, MailboxConfig,
+    PaymentKind, PaymentObservation, PaymentRecord, SourceKind, SubscriptionObservation,
+    UnsubscribeMethod,
 };
 
 use classify::MailHeader;
@@ -448,10 +449,16 @@ struct SubAgg {
     last: Option<DateTime<Utc>>,
     subjects: Vec<(Option<DateTime<Utc>>, String)>,
     categories: HashMap<MailCategory, u32>,
+    watched: Vec<MailRef>,
 }
+
+/// Max watched mails (evidence) kept per list and scan.
+const MAX_WATCHED: usize = 200;
 
 impl SubAgg {
     fn into_observation(self, mailbox: &str, list_key: String) -> SubscriptionObservation {
+        let mut watched = self.watched;
+        watched.sort_by_key(|m| m.date);
         let mut subjects = self.subjects;
         subjects.sort_by_key(|a| std::cmp::Reverse(a.0));
         let sample_subjects = subjects.into_iter().map(|(_, s)| s).take(5).collect();
@@ -474,7 +481,7 @@ impl SubAgg {
             last_seen: self.last,
             sample_subjects,
             category,
-            watched_mails: Vec::new(),
+            watched_mails: watched,
         }
     }
 }
@@ -485,21 +492,81 @@ struct ScanState {
     subs: HashMap<String, SubAgg>,
     seen: HashSet<String>,
     classified: u64,
+    payments: Vec<PaymentObservation>,
+    /// Lowercase list keys whose mails are kept as `MailRef` evidence.
+    watch: HashSet<String>,
 }
 
 struct Ingested {
     needs_body: bool,
     source_ref: String,
+    /// Set if the subject / sender looks like a receipt, renewal, price change ...
+    payment_kind: Option<PaymentKind>,
+}
+
+/// Subject phrases of one-time-code / second-factor mails (folded, see [`classify::fold`]).
+const TWO_FACTOR: &[&str] = &[
+    "bestaetigungscode",
+    "verification code",
+    "anmeldecode",
+    "login code",
+    "login-code",
+    "log-in code",
+    "sign-in code",
+    "signin code",
+    "security code",
+    "sicherheitscode",
+    "one-time code",
+    "one-time password",
+    "one time code",
+    "einmalcode",
+    "einmal-code",
+    "einmalpasswort",
+    "2-step verification",
+    "2-schritt",
+    "zwei-faktor",
+    "2-faktor",
+    "two-factor",
+    "two factor",
+    "2fa",
+    "your code is",
+    "dein code",
+    "ihr code",
+    "code de verification",
+    "code de securite",
+    "code de connexion",
+    "codigo de verificacion",
+    "codigo de seguridad",
+    "codigo de acceso",
+    "codice di verifica",
+    "verificatiecode",
+    "inlogcode",
+];
+
+fn is_two_factor(subject: &str) -> bool {
+    let f = classify::fold(&classify::decode_header(subject));
+    TWO_FACTOR.iter().any(|k| f.contains(k))
 }
 
 impl ScanState {
+    #[cfg(test)]
     fn new(mailbox: &str) -> Self {
+        Self::with_options(mailbox, &ScanOptions::default())
+    }
+
+    fn with_options(mailbox: &str, options: &ScanOptions) -> Self {
         ScanState {
             mailbox: mailbox.to_string(),
             findings: HashMap::new(),
             subs: HashMap::new(),
             seen: HashSet::new(),
             classified: 0,
+            payments: Vec::new(),
+            watch: options
+                .watch_lists
+                .iter()
+                .map(|k| k.trim().to_lowercase())
+                .collect(),
         }
     }
 
@@ -539,7 +606,20 @@ impl ScanState {
     }
 
     /// Process one mail's headers. Returns `None` for a duplicate (same Message-ID).
+    #[cfg(test)]
     fn ingest(&mut self, h: &MailHeader, fallback_ref: &str, own: &str) -> Option<Ingested> {
+        self.ingest_raw(h, fallback_ref, own, "")
+    }
+
+    /// Like [`Self::ingest`]; `raw_headers` is the fetched header block (kept as evidence
+    /// for watched lists).
+    fn ingest_raw(
+        &mut self,
+        h: &MailHeader,
+        fallback_ref: &str,
+        own: &str,
+        raw_headers: &str,
+    ) -> Option<Ingested> {
         let source_ref = match h
             .message_id
             .as_deref()
@@ -554,15 +634,29 @@ impl ScanState {
             }
             None => fallback_ref.to_string(),
         };
-        if let Some(c) = classify::classify_for(h, Some(own)) {
+        if let Some(mut c) = classify::classify_for(h, Some(own)) {
+            // One-time codes / 2FA mails are second-factor evidence, plain alerts stay alerts.
+            if matches!(
+                c.kind,
+                EvidenceKind::LoginAlert | EvidenceKind::Verification
+            ) && is_two_factor(&h.subject)
+            {
+                c.kind = EvidenceKind::TwoFactor;
+            }
             self.push_finding(c, h, &source_ref);
         }
+        let payment_kind = receipts::payment_kind(h);
+        if payment_kind.is_some() {
+            let lines = receipts::extract_from_subject(h);
+            self.add_payments(h, &lines, &source_ref, own);
+        }
         if classify::is_bulk(h) {
-            self.aggregate_subscription(h, own);
+            self.aggregate_subscription(h, own, raw_headers);
         }
         Some(Ingested {
             needs_body: classify::needs_body(h),
             source_ref,
+            payment_kind,
         })
     }
 
@@ -572,7 +666,110 @@ impl ScanState {
         }
     }
 
-    fn aggregate_subscription(&mut self, h: &MailHeader, own: &str) {
+    /// Replace the subject-derived payments of a mail by the ones found in its body.
+    /// Gaps in the body result (e.g. no amount) are filled from the subject.
+    fn apply_receipt_body(&mut self, h: &MailHeader, body: &str, source_ref: &str, own: &str) {
+        let mut lines = receipts::extract_from_body(h, body);
+        if lines.is_empty() {
+            return;
+        }
+        let subject = receipts::extract_from_subject(h);
+        if let ([line], [subj]) = (lines.as_mut_slice(), subject.as_slice()) {
+            if line.amount_minor.is_none() {
+                line.amount_minor = subj.amount_minor;
+                line.currency = subj.currency.clone();
+            }
+        }
+        self.remove_payments(source_ref);
+        self.add_payments(h, &lines, source_ref, own);
+    }
+
+    fn remove_payments(&mut self, source_ref: &str) {
+        let prefix = format!("{source_ref}#");
+        let matches =
+            |r: Option<&str>| r.is_some_and(|r| r == source_ref || r.starts_with(&prefix));
+        self.payments
+            .retain(|p| !matches(p.record.source_ref.as_deref()));
+        for ((_, kind), list) in self.findings.iter_mut() {
+            if *kind == EvidenceKind::Payment {
+                list.retain(|f| !matches(f.evidence.source_ref.as_deref()));
+            }
+        }
+        self.findings.retain(|_, l| !l.is_empty());
+    }
+
+    /// Turn receipt lines into `PaymentObservation`s plus `Payment` evidence for the merchant.
+    fn add_payments(
+        &mut self,
+        h: &MailHeader,
+        lines: &[receipts::ReceiptLine],
+        source_ref: &str,
+        own: &str,
+    ) {
+        let (_, from) = classify::parse_address(&h.from);
+        let Some(from) = from else { return };
+        let host = classify::host_of(&from);
+        if from.eq_ignore_ascii_case(own.trim())
+            || !host.contains('.')
+            || classify::is_freemail(host)
+        {
+            return;
+        }
+        let subject = classify::decode_header(&h.subject);
+        let identifier = classify::parse_address(&h.to).1;
+        for (i, line) in lines.iter().enumerate() {
+            let Some(domain) = line
+                .merchant_domain
+                .clone()
+                .filter(|d| !d.trim().is_empty())
+            else {
+                continue;
+            };
+            let line_ref = if line.via.is_some() {
+                format!("{source_ref}#{i}")
+            } else {
+                source_ref.to_string()
+            };
+            let summary = match (&line.merchant_name, &line.plan, line.via.is_some()) {
+                (Some(n), Some(p), true) => format!("{n} – {p}"),
+                (Some(n), None, true) if lines.len() > 1 => n.clone(),
+                _ if subject.is_empty() => "(ohne Betreff)".to_string(),
+                _ => subject.clone(),
+            };
+            self.payments.push(PaymentObservation {
+                domain: domain.clone(),
+                name: line.merchant_name.clone(),
+                identifier: identifier.clone(),
+                source: SourceKind::Mail {
+                    mailbox: self.mailbox.clone(),
+                },
+                record: PaymentRecord {
+                    date: h.date,
+                    kind: line.kind,
+                    amount_minor: line.amount_minor,
+                    currency: line.currency.clone(),
+                    plan: line.plan.clone(),
+                    method: line.method.clone(),
+                    via: line.via.clone(),
+                    summary: truncate(&summary, 140),
+                    source_ref: Some(line_ref.clone()),
+                },
+            });
+            self.push_finding(
+                classify::Classification {
+                    kind: EvidenceKind::Payment,
+                    domain,
+                    name: line.merchant_name.clone(),
+                    sso: None,
+                    identifier: identifier.clone(),
+                },
+                h,
+                &line_ref,
+            );
+        }
+    }
+
+    fn aggregate_subscription(&mut self, h: &MailHeader, own: &str, raw_headers: &str) {
         let (name, addr) = classify::parse_address(&h.from);
         let Some(addr) = addr else { return };
         if addr.eq_ignore_ascii_case(own.trim()) {
@@ -602,6 +799,7 @@ impl ScanState {
         let category = classify::categorize(h);
         let subject = classify::decode_header(&h.subject);
 
+        let watched = self.watch.contains(&list_key);
         let agg = self.subs.entry(list_key).or_insert_with(|| SubAgg {
             sender: addr.clone(),
             sender_name: name.clone(),
@@ -613,6 +811,7 @@ impl ScanState {
             last: None,
             subjects: Vec::new(),
             categories: HashMap::new(),
+            watched: Vec::new(),
         });
         let newest = match (h.date, agg.last) {
             (Some(d), Some(l)) => d >= l,
@@ -651,6 +850,20 @@ impl ScanState {
             }
         }
         *agg.categories.entry(category).or_insert(0) += 1;
+        if watched && agg.watched.len() < MAX_WATCHED {
+            agg.watched.push(MailRef {
+                date: h.date,
+                from: classify::decode_header(&h.from),
+                subject: subject.clone(),
+                message_id: h
+                    .message_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                raw_headers: raw_headers.trim_end().to_string(),
+            });
+        }
     }
 
     fn finish(self) -> (Vec<Finding>, Vec<SubscriptionObservation>) {
@@ -686,6 +899,19 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), MailError> {
 /// Scan the configured folders. Incremental by default: only UIDs above the stored
 /// progress (if UIDVALIDITY matches). `full_rescan` ignores progress.
 /// Runs blocking; call from a worker thread. Checks `cancel` between batches.
+pub fn scan_mailbox(
+    cfg: &MailboxConfig,
+    full_rescan: bool,
+    on_event: &mut dyn FnMut(ScanEvent),
+    cancel: &AtomicBool,
+) -> Result<ScanOutcome, MailError> {
+    let options = ScanOptions {
+        full_rescan,
+        ..Default::default()
+    };
+    scan_mailbox_with(cfg, &options, on_event, cancel)
+}
+
 /// Like [`scan_mailbox`] with all wave-2 options (payment extraction, watched lists).
 pub fn scan_mailbox_with(
     cfg: &MailboxConfig,
@@ -693,19 +919,9 @@ pub fn scan_mailbox_with(
     on_event: &mut dyn FnMut(ScanEvent),
     cancel: &AtomicBool,
 ) -> Result<ScanOutcome, MailError> {
-    let _ = (cfg, options, on_event, cancel);
-    todo!("implemented by mail agent")
-}
-
-pub fn scan_mailbox(
-    cfg: &MailboxConfig,
-    full_rescan: bool,
-    on_event: &mut dyn FnMut(ScanEvent),
-    cancel: &AtomicBool,
-) -> Result<ScanOutcome, MailError> {
     check_cancel(cancel)?;
     let mut client = connect_and_login(cfg)?;
-    let result = scan_with_client(&mut client, cfg, full_rescan, on_event, cancel);
+    let result = scan_with_client(&mut client, cfg, options, on_event, cancel);
     client.logout();
     result
 }
@@ -713,7 +929,7 @@ pub fn scan_mailbox(
 fn scan_with_client(
     client: &mut Client,
     cfg: &MailboxConfig,
-    full_rescan: bool,
+    options: &ScanOptions,
     on_event: &mut dyn FnMut(ScanEvent),
     cancel: &AtomicBool,
 ) -> Result<ScanOutcome, MailError> {
@@ -729,7 +945,7 @@ fn scan_with_client(
         cfg.folders.clone()
     };
 
-    let mut state = ScanState::new(&cfg.address);
+    let mut state = ScanState::with_options(&cfg.address, options);
     let mut progress = Vec::new();
     let mut items_scanned = 0u64;
     for folder in &folders {
@@ -738,20 +954,27 @@ fn scan_with_client(
             client,
             cfg,
             folder,
-            full_rescan,
+            options,
             &mut state,
             &mut items_scanned,
             on_event,
             cancel,
         )?);
     }
+    let mut payments = std::mem::take(&mut state.payments);
+    payments.sort_by(|a, b| {
+        a.record
+            .date
+            .cmp(&b.record.date)
+            .then_with(|| a.record.source_ref.cmp(&b.record.source_ref))
+    });
     let (findings, subscriptions) = state.finish();
     Ok(ScanOutcome {
         findings,
         subscriptions,
         items_scanned,
         progress,
-        payments: Vec::new(),
+        payments,
     })
 }
 
@@ -760,7 +983,7 @@ fn scan_folder(
     client: &mut Client,
     cfg: &MailboxConfig,
     folder: &str,
-    full_rescan: bool,
+    options: &ScanOptions,
     state: &mut ScanState,
     items_scanned: &mut u64,
     on_event: &mut dyn FnMut(ScanEvent),
@@ -769,7 +992,7 @@ fn scan_folder(
     let ex = client.examine(folder)?;
     let prev = cfg.progress.iter().find(|p| p.folder == folder);
     let start = match prev {
-        Some(p) if !full_rescan && p.uid_validity == ex.uid_validity => {
+        Some(p) if !options.full_rescan && p.uid_validity == ex.uid_validity => {
             p.last_uid.saturating_add(1)
         }
         _ => 1,
@@ -804,13 +1027,23 @@ fn scan_folder(
             }
             *items_scanned += 1;
             let fallback = format!("{folder}/{}/{uid}", ex.uid_validity);
-            let Some(ing) = state.ingest(&header, &fallback, &cfg.address) else {
+            let raw_text = String::from_utf8_lossy(raw);
+            let Some(ing) = state.ingest_raw(&header, &fallback, &cfg.address, &raw_text) else {
                 continue;
             };
+            // Best effort: a failing body fetch never aborts the scan.
+            let mut body: Option<Option<String>> = None;
             if ing.needs_body {
-                // Best effort: a failing body fetch never aborts the scan.
-                if let Some(text) = fetch_sso_text(client, uid) {
-                    state.ingest_sso(&header, &text, &ing.source_ref);
+                let text = fetch_sso_text(client, uid);
+                if let Some(text) = &text {
+                    state.ingest_sso(&header, text, &ing.source_ref);
+                }
+                body = Some(text);
+            }
+            if options.read_receipt_bodies && ing.payment_kind.is_some() {
+                let text = body.take().unwrap_or_else(|| fetch_sso_text(client, uid));
+                if let Some(text) = text {
+                    state.apply_receipt_body(&header, &text, &ing.source_ref, &cfg.address);
                 }
             }
         }
@@ -1428,6 +1661,304 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let err = scan_mailbox(&cfg_for(1), false, &mut |_| {}, &cancel).unwrap_err();
         assert!(matches!(err, MailError::Cancelled));
+    }
+
+    // ---- wave 2: payments, two-factor, watched lists ---------------------------------------------
+
+    #[test]
+    fn two_factor_vs_login_alert() {
+        let mut st = ScanState::new("me@example.org");
+        let code = mail(
+            "Service <login@service.example>",
+            "Dein Bestätigungscode",
+            "Mon, 01 Jan 2024 10:00:00 +0000",
+            "<c1@service.example>",
+        );
+        let alert = mail(
+            "Service <login@service.example>",
+            "Neue Anmeldung auf einem Gerät",
+            "Tue, 02 Jan 2024 10:00:00 +0000",
+            "<c2@service.example>",
+        );
+        let two_step = mail(
+            "Google <no-reply@accounts.google.com>",
+            "2-Step Verification turned on",
+            "Wed, 03 Jan 2024 10:00:00 +0000",
+            "<c3@google.com>",
+        );
+        for h in [&code, &alert, &two_step] {
+            st.ingest(h, "f", "me@example.org").unwrap();
+        }
+        let (findings, _) = st.finish();
+        let kind_of = |id: &str| {
+            findings
+                .iter()
+                .find(|f| f.evidence.source_ref.as_deref() == Some(id))
+                .map(|f| f.evidence.kind)
+        };
+        assert_eq!(
+            kind_of("<c1@service.example>"),
+            Some(EvidenceKind::TwoFactor)
+        );
+        assert_eq!(
+            kind_of("<c2@service.example>"),
+            Some(EvidenceKind::LoginAlert)
+        );
+        assert_eq!(kind_of("<c3@google.com>"), Some(EvidenceKind::TwoFactor));
+    }
+
+    #[test]
+    fn subject_payment_creates_observation_and_evidence() {
+        let mut st = ScanState::new("me@example.org");
+        let h = mail(
+            "Spotify <no-reply@spotify.com>",
+            "Your receipt from Spotify – €10.99",
+            "Mon, 01 Jan 2024 10:00:00 +0000",
+            "<p1@spotify.com>",
+        );
+        let ing = st.ingest(&h, "f", "me@example.org").unwrap();
+        assert_eq!(ing.payment_kind, Some(PaymentKind::Charge));
+        assert_eq!(st.payments.len(), 1);
+        let p = &st.payments[0];
+        assert_eq!(p.domain, "spotify.com");
+        assert_eq!(p.record.amount_minor, Some(1099));
+        assert_eq!(p.record.source_ref.as_deref(), Some("<p1@spotify.com>"));
+        assert_eq!(p.identifier.as_deref(), Some("me@example.org"));
+        let (findings, _) = st.finish();
+        assert!(findings
+            .iter()
+            .any(|f| f.domain == "spotify.com" && f.evidence.kind == EvidenceKind::Payment));
+    }
+
+    #[test]
+    fn freemail_and_own_senders_yield_no_payments() {
+        let mut st = ScanState::new("me@example.org");
+        for (from, id) in [
+            ("Max <max@gmail.com>", "<a@x>"),
+            ("Me <me@example.org>", "<b@x>"),
+        ] {
+            let h = mail(from, "Rechnung", "Mon, 01 Jan 2024 10:00:00 +0000", id);
+            st.ingest(&h, "f", "me@example.org").unwrap();
+        }
+        assert!(st.payments.is_empty());
+    }
+
+    const APPLE_BODY: &str = "Deine Rechnung von Apple.\nABGERECHNET AN\tVisa •••• 1234\nSpotify\nSpotify Premium (1 Monat)\nVerlängert sich am 12.04.2024\n9,99 €\nDisney+\nDisney+ Standard (Monatlich)\n8,99 €\nSUMME\t18,98 €\n";
+
+    #[test]
+    fn body_replaces_subject_payments() {
+        let mut st = ScanState::new("me@example.org");
+        let h = mail(
+            "Apple <no_reply@email.apple.com>",
+            "Deine Rechnung von Apple.",
+            "Mon, 01 Jan 2024 10:00:00 +0000",
+            "<r@apple>",
+        );
+        let ing = st.ingest(&h, "f", "me@example.org").unwrap();
+        assert_eq!(st.payments.len(), 1);
+        assert_eq!(st.payments[0].domain, "apple.com");
+        st.apply_receipt_body(&h, APPLE_BODY, &ing.source_ref, "me@example.org");
+        let domains: Vec<_> = st.payments.iter().map(|p| p.domain.as_str()).collect();
+        assert_eq!(domains, vec!["unresolved:spotify", "unresolved:disney"]);
+        let refs: Vec<_> = st
+            .payments
+            .iter()
+            .map(|p| p.record.source_ref.clone().unwrap())
+            .collect();
+        assert_eq!(refs, vec!["<r@apple>#0", "<r@apple>#1"]);
+        assert_eq!(
+            st.payments[0].record.method,
+            Some(spurlos_core::PaymentMethod::Card {
+                brand: "Visa".into(),
+                last4: "1234".into()
+            })
+        );
+        assert_eq!(st.payments[0].record.via.as_deref(), Some("apple.com"));
+        let (findings, _) = st.finish();
+        let pay: Vec<_> = findings
+            .iter()
+            .filter(|f| f.evidence.kind == EvidenceKind::Payment)
+            .map(|f| f.domain.as_str())
+            .collect();
+        assert_eq!(pay, vec!["unresolved:disney", "unresolved:spotify"]);
+    }
+
+    #[test]
+    fn empty_body_result_keeps_subject_payment() {
+        let mut st = ScanState::new("me@example.org");
+        let h = mail(
+            "Spotify <no-reply@spotify.com>",
+            "Your receipt from Spotify – €10.99",
+            "Mon, 01 Jan 2024 10:00:00 +0000",
+            "<p2@spotify.com>",
+        );
+        let ing = st.ingest(&h, "f", "me@example.org").unwrap();
+        st.apply_receipt_body(&h, "Thanks!", &ing.source_ref, "me@example.org");
+        assert_eq!(st.payments.len(), 1);
+        // The body had no amount: the subject's amount fills the gap.
+        assert_eq!(st.payments[0].record.amount_minor, Some(1099));
+    }
+
+    #[test]
+    fn watched_lists_collect_mail_refs_capped() {
+        let opts = ScanOptions {
+            watch_lists: vec!["News.Shop.Example".into()],
+            ..Default::default()
+        };
+        let mut st = ScanState::with_options("me@example.org", &opts);
+        for i in 0..(MAX_WATCHED + 20) {
+            let h = newsletter(
+                &format!("Angebot {i}"),
+                "Mon, 01 Jan 2024 10:00:00 +0000",
+                &format!("<w{i}@shop.example>"),
+                "<mailto:u@shop.example>",
+            );
+            st.ingest_raw(
+                &h,
+                "f",
+                "me@example.org",
+                "From: Shop\r\nSubject: x\r\n\r\n",
+            )
+            .unwrap();
+        }
+        // A second, unwatched list.
+        let mut other = mail(
+            "Other <o@other.example>",
+            "Hi",
+            "Mon, 01 Jan 2024 10:00:00 +0000",
+            "<o1@other.example>",
+        );
+        other.precedence = Some("bulk".into());
+        st.ingest_raw(&other, "f", "me@example.org", "From: Other\r\n\r\n")
+            .unwrap();
+        let (_, subs) = st.finish();
+        let shop = subs
+            .iter()
+            .find(|s| s.list_key == "news.shop.example")
+            .unwrap();
+        assert_eq!(shop.message_count as usize, MAX_WATCHED + 20);
+        assert_eq!(shop.watched_mails.len(), MAX_WATCHED);
+        let m = &shop.watched_mails[0];
+        assert_eq!(m.from, "Shop News <news@shop.example>");
+        assert!(m.subject.starts_with("Angebot"));
+        assert!(m.message_id.as_deref().unwrap().ends_with("@shop.example>"));
+        assert!(m.raw_headers.starts_with("From: Shop"));
+        let other = subs
+            .iter()
+            .find(|s| s.list_key == "o@other.example")
+            .unwrap();
+        assert!(other.watched_mails.is_empty());
+    }
+
+    fn wave2_mails() -> Vec<FakeMail> {
+        let apple_body = APPLE_BODY.replace('\n', "\r\n");
+        let spotify_body = "Danke für deine Zahlung!\r\nPlan: Premium Family\r\nGesamt 16,80 €\r\nBezahlt mit Visa ending in 4242\r\n";
+        vec![
+            FakeMail {
+                uid: 20,
+                header: "From: Apple <no_reply@email.apple.com>\r\nSubject: Deine Rechnung von Apple.\r\nDate: Mon, 04 Mar 2024 10:00:00 +0000\r\nMessage-ID: <r1@apple.com>\r\nTo: me@example.org\r\n\r\n".into(),
+                body: Some(apple_body),
+            },
+            FakeMail {
+                uid: 21,
+                header: "From: Spotify <no-reply@spotify.com>\r\nSubject: Deine Rechnung von Spotify\r\nDate: Tue, 05 Mar 2024 10:00:00 +0000\r\nMessage-ID: <r2@spotify.com>\r\nTo: me@example.org\r\n\r\n".into(),
+                body: Some(spotify_body.into()),
+            },
+            FakeMail {
+                uid: 22,
+                header: "From: Shop <news@shop.example>\r\nSubject: 20% Rabatt\r\nDate: Wed, 06 Mar 2024 10:00:00 +0000\r\nMessage-ID: <n1@shop.example>\r\nTo: me@example.org\r\nList-Id: <news.shop.example>\r\nList-Unsubscribe: <mailto:unsub@shop.example>\r\n\r\n".into(),
+                body: None,
+            },
+            FakeMail {
+                uid: 23,
+                header: "From: Service <login@service.example>\r\nSubject: Dein Bestätigungscode\r\nDate: Thu, 07 Mar 2024 10:00:00 +0000\r\nMessage-ID: <c1@service.example>\r\nTo: me@example.org\r\n\r\n".into(),
+                body: None,
+            },
+        ]
+    }
+
+    #[test]
+    fn end_to_end_receipts_subject_only() {
+        let port = spawn_server(wave2_mails(), 5);
+        let opts = ScanOptions {
+            watch_lists: vec!["news.shop.example".into()],
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+        let out = scan_mailbox_with(&cfg_for(port), &opts, &mut |_| {}, &cancel).unwrap();
+        assert_eq!(out.items_scanned, 4);
+        // Subjects only: no amounts, no card.
+        assert_eq!(out.payments.len(), 2);
+        assert!(out.payments.iter().all(|p| p.record.amount_minor.is_none()));
+        assert!(out.payments.iter().all(|p| p.record.method.is_none()));
+        let apple = &out.payments[0];
+        assert_eq!(apple.domain, "apple.com");
+        assert_eq!(apple.record.via.as_deref(), Some("apple.com"));
+        assert_eq!(apple.record.kind, PaymentKind::Charge);
+        assert_eq!(out.payments[1].domain, "spotify.com");
+        assert!(out
+            .findings
+            .iter()
+            .any(|f| f.domain == "spotify.com" && f.evidence.kind == EvidenceKind::Payment));
+        let tf = out
+            .findings
+            .iter()
+            .find(|f| f.evidence.kind == EvidenceKind::TwoFactor)
+            .unwrap();
+        assert_eq!(tf.domain, "service.example");
+        // Watched list.
+        let sub = out
+            .subscriptions
+            .iter()
+            .find(|s| s.list_key == "news.shop.example")
+            .unwrap();
+        assert_eq!(sub.watched_mails.len(), 1);
+        assert_eq!(sub.watched_mails[0].subject, "20% Rabatt");
+        assert!(sub.watched_mails[0]
+            .raw_headers
+            .contains("Message-ID: <n1@shop.example>"));
+        assert!(sub.watched_mails[0].date.is_some());
+    }
+
+    #[test]
+    fn end_to_end_receipt_bodies_on() {
+        let port = spawn_server(wave2_mails(), 5);
+        let opts = ScanOptions {
+            read_receipt_bodies: true,
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+        let out = scan_mailbox_with(&cfg_for(port), &opts, &mut |_| {}, &cancel).unwrap();
+        let by_domain = |d: &str| out.payments.iter().find(|p| p.domain == d).unwrap();
+        let spotify = by_domain("spotify.com");
+        assert_eq!(spotify.record.amount_minor, Some(1680));
+        assert_eq!(spotify.record.plan.as_deref(), Some("Premium Family"));
+        assert_eq!(
+            spotify.record.method,
+            Some(spurlos_core::PaymentMethod::Card {
+                brand: "Visa".into(),
+                last4: "4242".into()
+            })
+        );
+        assert_eq!(
+            spotify.record.source_ref.as_deref(),
+            Some("<r2@spotify.com>")
+        );
+        let sp = by_domain("unresolved:spotify");
+        assert_eq!(sp.record.amount_minor, Some(999));
+        assert_eq!(sp.record.source_ref.as_deref(), Some("<r1@apple.com>#0"));
+        assert_eq!(sp.record.via.as_deref(), Some("apple.com"));
+        let di = by_domain("unresolved:disney");
+        assert_eq!(di.record.amount_minor, Some(899));
+        assert_eq!(di.record.source_ref.as_deref(), Some("<r1@apple.com>#1"));
+        // The subject-level Apple payment was replaced by the item lines.
+        assert!(out.payments.iter().all(|p| p.domain != "apple.com"));
+        assert!(out
+            .findings
+            .iter()
+            .all(|f| !(f.domain == "apple.com" && f.evidence.kind == EvidenceKind::Payment)));
+        // No watch list requested: nothing collected.
+        assert!(out.subscriptions.iter().all(|s| s.watched_mails.is_empty()));
     }
 
     #[test]

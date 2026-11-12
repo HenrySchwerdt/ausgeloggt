@@ -149,15 +149,15 @@ fn addresses(raw: &str) -> Vec<String> {
     out
 }
 
-fn host_of(addr: &str) -> &str {
+pub(crate) fn host_of(addr: &str) -> &str {
     addr.rsplit_once('@').map(|(_, h)| h).unwrap_or("")
 }
 
-fn local_of(addr: &str) -> &str {
+pub(crate) fn local_of(addr: &str) -> &str {
     addr.rsplit_once('@').map(|(l, _)| l).unwrap_or(addr)
 }
 
-fn host_is(host: &str, domain: &str) -> bool {
+pub(crate) fn host_is(host: &str, domain: &str) -> bool {
     host == domain
         || (host.len() > domain.len()
             && host.ends_with(domain)
@@ -242,7 +242,7 @@ const FREEMAIL: &[&str] = &[
     "bol.com.br",
 ];
 
-fn is_freemail(host: &str) -> bool {
+pub(crate) fn is_freemail(host: &str) -> bool {
     FREEMAIL.contains(&host)
 }
 
@@ -905,7 +905,7 @@ static PERCENT_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("percent regex")
 });
 
-fn is_promo(folded_subject: &str) -> bool {
+pub(crate) fn is_promo(folded_subject: &str) -> bool {
     PROMO_RE.is_match(folded_subject) || PERCENT_RE.is_match(folded_subject)
 }
 
@@ -1232,7 +1232,7 @@ fn compact_slug(s: &str) -> String {
 }
 
 /// Dash separated lowercase slug for `unresolved:<slug>` domains.
-fn slug(s: &str) -> String {
+pub(crate) fn slug(s: &str) -> String {
     let mut out = String::new();
     for c in fold(s).chars() {
         if c.is_ascii_alphanumeric() {

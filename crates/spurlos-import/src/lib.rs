@@ -4,6 +4,7 @@
 //! Only domain/URL, entry title and username/e-mail leave this crate.
 
 mod archive;
+mod audit;
 mod facebook;
 mod generic;
 mod instructions;
@@ -20,7 +21,7 @@ use std::path::Path;
 use spurlos_core::{Finding, PasswordFormat, SourceKind};
 
 use crate::archive::{Archive, MAX_FILE_BYTES};
-use crate::passwords::CsvKind;
+use crate::passwords::{CsvKind, PwRow};
 use crate::util::{decode_text, host_of};
 
 #[derive(Debug, thiserror::Error)]
@@ -144,6 +145,13 @@ fn import_archive(mut archive: Archive) -> Result<ImportResult, ImportError> {
 
 /// Import any supported file or folder; auto-detects the format.
 pub fn import_path(path: &Path) -> Result<ImportResult, ImportError> {
+    import_path_inner(path, None)
+}
+
+fn import_path_inner(
+    path: &Path,
+    audit: Option<&mut Vec<PwRow>>,
+) -> Result<ImportResult, ImportError> {
     if path.is_dir() {
         return import_archive(Archive::from_dir(path)?);
     }
@@ -162,9 +170,11 @@ pub fn import_path(path: &Path) -> Result<ImportResult, ImportError> {
                 .trim_start()
                 .starts_with('{') =>
         {
-            passwords::import_bitwarden_json(&text)
+            passwords::import_bitwarden_json_audit(&text, audit)
         }
-        DetectedKind::Passwords(_) => passwords::import_passwords(&text, edge_hint(path)),
+        DetectedKind::Passwords(_) => {
+            passwords::import_passwords_audit(&text, edge_hint(path), audit)
+        }
         DetectedKind::GenericList => import_list_text(&ext_of(path), &text),
         DetectedKind::GoogleTakeout | DetectedKind::FacebookExport => {
             Err(ImportError::UnknownFormat)
@@ -224,9 +234,14 @@ pub struct AuditedImport {
 /// Import with password audit. Reuse detection compares passwords in memory only
 /// (keyed by a per-run random salted hash, all buffers zeroized); nothing about the
 /// password itself leaves this function except counts / booleans.
-pub fn import_path_with(path: &Path, options: &ImportOptions<'_>) -> Result<AuditedImport, ImportError> {
-    let _ = (path, options);
-    todo!("implemented by import agent")
+pub fn import_path_with(
+    path: &Path,
+    options: &ImportOptions<'_>,
+) -> Result<AuditedImport, ImportError> {
+    let mut rows: Vec<PwRow> = Vec::new();
+    let result = import_path_inner(path, Some(&mut rows))?;
+    let security = audit::audit(rows, options.pwned);
+    Ok(AuditedImport { result, security })
 }
 
 /// Human readable help: how to create an export for each supported source (German).
@@ -339,6 +354,116 @@ mod tests {
             r#"[{"titleUrl":"https://t.example.com"}]"#,
         )]);
         assert_eq!(import_zip_bytes(tk).unwrap().findings.len(), 1);
+    }
+
+    struct Fake;
+    impl PwnedChecker for Fake {
+        fn pwned_count(&self, sha1: &[u8; 20]) -> Option<u64> {
+            use sha1::Digest;
+            let h = |s: &str| -> [u8; 20] { sha1::Sha1::digest(s.as_bytes()).into() };
+            if *sha1 == h("hunter2") {
+                Some(42)
+            } else if *sha1 == h("boom") {
+                None
+            } else {
+                Some(0)
+            }
+        }
+    }
+
+    fn audited(name: &str, content: &str, pwned: bool) -> AuditedImport {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(name);
+        std::fs::write(&p, content).unwrap();
+        let fake = Fake;
+        let opts = ImportOptions {
+            pwned: pwned.then_some(&fake as &dyn PwnedChecker),
+        };
+        import_path_with(&p, &opts).unwrap()
+    }
+
+    #[test]
+    fn audit_reuse_pwned_and_errors() {
+        let csv = "name,url,username,password
+A,https://a.example.com,u1,hunter2
+B,https://b.example.com,u2,hunter2
+C,https://c.example.com,u3,hunter2
+D,https://d.example.com,u4,Unique-Pass-9
+E,https://e.example.com,u5,boom
+";
+        let a = audited("c.csv", csv, true);
+        assert_eq!(a.security.len(), 5);
+        let by = |d: &str| a.security.iter().find(|s| s.domain == d).unwrap();
+        assert_eq!(by("a.example.com").password_reuse_count, Some(2));
+        assert_eq!(by("c.example.com").password_reuse_count, Some(2));
+        assert_eq!(by("a.example.com").password_pwned, Some(true));
+        assert_eq!(by("a.example.com").identifier.as_deref(), Some("u1"));
+        assert_eq!(by("d.example.com").password_reuse_count, Some(0));
+        assert_eq!(by("d.example.com").password_pwned, Some(false));
+        assert_eq!(by("e.example.com").password_pwned, None);
+        assert_eq!(by("d.example.com").has_2fa, None);
+        let dump = format!("{a:?}");
+        for p in ["hunter2", "Unique-Pass-9", "boom"] {
+            assert!(!dump.contains(p), "{p}");
+        }
+        let b = audited("c.csv", csv, false);
+        assert!(b.security.iter().all(|s| s.password_pwned.is_none()));
+        assert_eq!(b.result.findings.len(), 5);
+    }
+
+    #[test]
+    fn audit_totp_per_format() {
+        let bw = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+,0,login,A,,,0,https://t.example.com,u,pw1,TOTPSECRET
+,0,login,B,,,0,https://n.example.com,u,pw2,
+";
+        let a = audited("bw.csv", bw, false);
+        let by = |d: &str| a.security.iter().find(|s| s.domain == d).unwrap();
+        assert_eq!(by("t.example.com").has_2fa, Some(true));
+        assert_eq!(by("n.example.com").has_2fa, None);
+        assert!(!format!("{a:?}").contains("TOTPSECRET"));
+
+        let safari = "Title,URL,Username,Password,Notes,OTPAuth
+S,https://s.example.com,u,pw,,otpauth://totp/x?secret=ABC
+";
+        assert_eq!(
+            audited("s.csv", safari, false).security[0].has_2fa,
+            Some(true)
+        );
+        let op = "Title,Url,Username,Password,OTPAuth,Favorite,Archived,Tags,Notes
+S,https://o.example.com,u,pw,otpauth://x,0,0,,
+";
+        assert_eq!(audited("o.csv", op, false).security[0].has_2fa, Some(true));
+        let lp = "url,username,password,totp,extra,name,grouping,fav
+https://l.example.com,u,pw,123456,,L,,0
+";
+        assert_eq!(audited("l.csv", lp, false).security[0].has_2fa, Some(true));
+        let pr = "type,name,url,email,username,password,note,totp,createTime,modifyTime,vault
+login,P,https://p.example.com,a@b.c,,pw,,SECRET,1,1,Personal
+";
+        assert_eq!(audited("p.csv", pr, false).security[0].has_2fa, Some(true));
+        let kp = "\"Group\",\"Title\",\"Username\",\"Password\",\"URL\",\"Notes\",\"TOTP\",\"Icon\"
+\"Root\",\"K\",\"h\",\"pw\",\"https://k.example.com\",\"\",\"JBSWY3DP\",\"0\"
+";
+        assert_eq!(audited("k.csv", kp, false).security[0].has_2fa, Some(true));
+        let json = r#"{"encrypted":false,"items":[{"type":1,"name":"J","login":{"username":"u","password":"jsonpw","totp":"otpauth://totp/x","uris":[{"uri":"https://j.example.com"}]}},{"type":1,"name":"K","login":{"username":"u","password":"jsonpw","uris":[{"uri":"https://k.example.com"}]}}]}"#;
+        let j = audited("b.json", json, false);
+        assert_eq!(j.security[0].has_2fa, Some(true));
+        assert_eq!(j.security[1].has_2fa, None);
+        assert_eq!(j.security[0].password_reuse_count, Some(1));
+        assert!(!format!("{j:?}").contains("jsonpw"));
+    }
+
+    #[test]
+    fn audit_empty_for_non_password_sources() {
+        let a = audited(
+            "l.txt",
+            "foo.example.com
+",
+            true,
+        );
+        assert!(a.security.is_empty());
+        assert_eq!(a.result.findings.len(), 1);
     }
 
     #[test]

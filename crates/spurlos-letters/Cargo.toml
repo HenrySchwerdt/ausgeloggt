@@ -12,6 +12,11 @@ serde_json.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 log.workspace = true
+printpdf = { version = "0.12", default-features = false }
+ttf-parser = "0.25"
 
 [dependencies.spurlos-catalog]
 workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

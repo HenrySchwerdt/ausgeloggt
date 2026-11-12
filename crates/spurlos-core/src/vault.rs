@@ -359,9 +359,7 @@ fn sync_parent_dir(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Account, AccountStatus};
-    use chrono::Utc;
-    use uuid::Uuid;
+    use crate::model::Account;
 
     const FAST: KdfParams = KdfParams {
         m_cost_kib: 64,
@@ -370,25 +368,10 @@ mod tests {
     };
 
     fn account(domain: &str) -> Account {
-        Account {
-            id: Uuid::new_v4(),
-            domain: domain.into(),
-            name: "Test äöü".into(),
-            identifiers: vec!["a@b.de".into()],
-            sso: vec![],
-            evidence: vec![],
-            status: AccountStatus::Discovered,
-            confidence: 0.5,
-            first_seen: None,
-            last_seen: None,
-            tags: vec![],
-            notes: String::new(),
-            deletion: vec![],
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            payments: Vec::new(),
-            security: Default::default(),
-        }
+        let mut a = Account::new(domain, "Test äöü");
+        a.identifiers = vec!["a@b.de".into()];
+        a.confidence = 0.5;
+        a
     }
 
     fn new_vault(dir: &tempfile::TempDir) -> (PathBuf, Vault) {
