@@ -706,6 +706,9 @@ pub struct Settings {
     pub autostart: bool,
     /// Do not auto-lock while automations are enabled (weakens protection).
     pub keep_unlocked_for_automation: bool,
+    /// The first run wizard was completed or dismissed.
+    #[serde(default)]
+    pub onboarding_done: bool,
 }
 
 impl Default for Settings {
@@ -730,6 +733,7 @@ impl Default for Settings {
             start_minimized_to_tray: false,
             autostart: false,
             keep_unlocked_for_automation: false,
+            onboarding_done: false,
         }
     }
 }
@@ -742,9 +746,10 @@ pub struct AiSettings {
     pub ollama_url: String,
     /// Ollama model name, e.g. `llama3.2:3b`, `qwen2.5:7b`.
     pub ollama_model: String,
-    /// Anthropic API key (stored only in the encrypted vault).
-    pub anthropic_api_key: String,
-    pub anthropic_model: String,
+    /// Claude Code model alias (`haiku`, `sonnet`, `opus`); empty = `haiku`.
+    pub claude_model: String,
+    /// Codex model; empty = the Codex default.
+    pub codex_model: String,
 }
 
 impl Default for AiSettings {
@@ -753,8 +758,8 @@ impl Default for AiSettings {
             provider: AiProvider::Off,
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_model: String::new(),
-            anthropic_api_key: String::new(),
-            anthropic_model: "claude-haiku-5-5".into(),
+            claude_model: String::new(),
+            codex_model: String::new(),
         }
     }
 }
@@ -766,8 +771,13 @@ pub enum AiProvider {
     Off,
     /// Local model via Ollama: nothing leaves the machine. Recommended.
     Ollama,
-    /// Anthropic API: sends sender + subjects (never bodies) to Anthropic. Opt-in.
-    Anthropic,
+    /// Claude through the local Claude Code CLI on the user's own login (no API key).
+    /// Sends sender + subjects (never bodies) to Anthropic. Opt-in. Older vaults stored
+    /// the API key provider as `Anthropic`; it maps here.
+    #[serde(alias = "Anthropic")]
+    ClaudeCode,
+    /// OpenAI through the local Codex CLI on the user's ChatGPT login (no API key). Opt-in.
+    Codex,
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,5 +1064,20 @@ impl RequestStatus {
             RequestStatus::Done => "Erledigt",
             RequestStatus::Rejected => "Abgelehnt",
         }
+    }
+}
+
+#[cfg(test)]
+mod ai_settings_migration {
+    use super::*;
+
+    #[test]
+    fn old_anthropic_settings_become_claude_code_without_key() {
+        let old = r#"{"provider":"Anthropic","ollama_url":"http://127.0.0.1:11434","ollama_model":"","anthropic_api_key":"fake-test-key","anthropic_model":"claude-haiku-5-5"}"#;
+        let ai: AiSettings = serde_json::from_str(old).unwrap();
+        assert_eq!(ai.provider, AiProvider::ClaudeCode);
+        let again = serde_json::to_string(&ai).unwrap();
+        assert!(!again.contains("fake-test-key") && !again.contains("anthropic_api_key"));
+        assert!(again.contains("\"ClaudeCode\""));
     }
 }

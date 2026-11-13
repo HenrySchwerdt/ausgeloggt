@@ -148,6 +148,8 @@ import { siSteelseries } from "simple-icons";
 import { siLogitech } from "simple-icons-legacy";
 import { siRazer } from "simple-icons";
 import { siCorsair } from "simple-icons";
+import { siGmx } from "simple-icons";
+import { siWebdotde } from "simple-icons";
 import { siOpera } from "simple-icons";
 import { siFirefoxbrowser } from "simple-icons";
 import { siGooglechrome } from "simple-icons";
@@ -308,6 +310,8 @@ export const BRAND_PATHS: Record<string, string> = {
   "logitech": siLogitech.path,
   "razer": siRazer.path,
   "corsair": siCorsair.path,
+  "gmx": siGmx.path,
+  "webdotde": siWebdotde.path,
   "opera": siOpera.path,
   "firefoxbrowser": siFirefoxbrowser.path,
   "googlechrome": siGooglechrome.path,

@@ -3,3 +3,12 @@
 *.ausgeloggt.bak
 .DS_Store
 /.cargo/config.toml
+
+# Secrets and local data, never commit
+.env
+.env.*
+*.pem
+*.key
+auth.json
+*.mbox
+*.eml

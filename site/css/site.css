@@ -172,6 +172,9 @@ h2{font-size:clamp(28px,3.4vw,42px);letter-spacing:-.035em;line-height:1.1}
 .facts dt,.facts dd{padding:14px 0;border-bottom:1px solid var(--border)}
 .facts dt{color:var(--text-3)}
 .facts dd{color:var(--text)}
+.facts.dl{grid-template-columns:140px 1fr;margin-top:24px;font-family:"Inter",system-ui,sans-serif}
+.facts dd a{color:var(--text);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--border-strong,var(--border))}
+.facts dd a:hover{text-decoration-color:currentColor}
 
 /* download */
 .code{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px 24px;font:13px/1.9 var(--mono);overflow-x:auto;white-space:pre;color:var(--text)}

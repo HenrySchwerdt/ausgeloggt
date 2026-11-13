@@ -8,17 +8,22 @@ import type {
 } from "./types";
 import { ACCOUNT_STATUS_LABEL, SUBSCRIPTION_STATUS_LABEL } from "./types";
 import { discoveryStats } from "./derive";
+import type { UnsubscribeFailureReason } from "./ipc";
 
 const UNDO_MS = 6000;
 
-// Onboarding flag. The backend settings have no field for it yet, so it lives in localStorage per vault file.
+// Onboarding flag: `settings.onboarding_done` in the vault. Older versions kept it in localStorage per vault file;
+// that value is read once and migrated into the vault.
 const onboardingKey = (path: string) => `ausgeloggt-onboarding:${path || "default"}`;
-function onboardingDone(path: string): boolean {
+function legacyOnboardingDone(path: string): boolean {
   try { return localStorage.getItem(onboardingKey(path)) === "1"; } catch { return false; }
 }
-function markOnboardingDone(path: string) {
-  try { localStorage.setItem(onboardingKey(path), "1"); } catch { /* storage unavailable */ }
-}
+
+/** Number of automation runs started from the UI (their result is shown there, not as a global toast). */
+export const uiAutomation = { running: 0 };
+
+/** Remembered answer to "Löschantrag automatisch senden?" in the review flow, for this session only. */
+export const queueChoice: { value: "yes" | "no" | null } = { value: null };
 
 export type Theme = "dark" | "light";
 type Phase = "boot" | "locked" | "ready";
@@ -33,6 +38,8 @@ export const JOB_LABEL: Record<JobKind, string> = {
   screenshot_read: "Screenshots werden gelesen",
   breach_check: "Datenlecks werden geprüft",
   catalog_refresh: "Katalog wird aktualisiert",
+  send: "Mails werden gesendet",
+  automation: "Automatik läuft",
 };
 
 interface State {
@@ -50,6 +57,9 @@ interface State {
   jobs: Record<string, RunningJobInfo>;
   dropHover: boolean;
   onboarding: boolean;
+  /** Why the last automatic unsubscribe of a list failed (machine readable). */
+  unsubReasons: Record<string, UnsubscribeFailureReason>;
+  setUnsubReasons(r: Record<string, UnsubscribeFailureReason | null>): void;
   openOnboarding(): void;
   closeOnboarding(): void;
   setAccountsFilter(f: AccountStatus | "all" | "hidden"): void;
@@ -64,6 +74,8 @@ interface State {
   setDropHover(b: boolean): void;
   setAccountStatus(ids: string[], status: AccountStatus, quiet?: boolean): Promise<void>;
   setNotes(id: string, notes: string): Promise<void>;
+  /** Put accounts into (or take them out of) the deletion queue. */
+  setQueued(ids: string[], queued: boolean, quiet?: boolean): Promise<void>;
   setSubscriptionStatus(ids: string[], status: SubscriptionStatus): Promise<void>;
 }
 
@@ -135,6 +147,8 @@ export const useStore = create<State>((set, get) => {
     void api.events.onJobDone((d) => {
       set((s) => { const j = { ...s.jobs }; delete j[d.jobId]; return { jobs: j }; });
       if (d.ok && (d.kind === "scan" || d.kind === "import")) void announceFindings(d.summary);
+      else if (d.kind === "send") { /* the sender shows its own result */ }
+      else if (d.kind === "automation" && uiAutomation.running > 0) { /* shown on the automation page */ }
       else if (d.ok) toast(d.summary);
       else if (d.summary === "Abgebrochen") toast("Abgebrochen");
       else toast.error(d.error?.message ?? d.summary);
@@ -148,8 +162,13 @@ export const useStore = create<State>((set, get) => {
     await loadAll();
     const snap = get().snap;
     const fresh = !!snap && snap.accounts.length === 0 && snap.mailboxes.length === 0;
+    let done = !!snap?.settings.onboarding_done;
+    if (snap && !done && legacyOnboardingDone(get().vaultPath)) {
+      done = true;
+      void api.settings.update({ onboarding_done: true }).catch(() => {});
+    }
     const onboarding = justCreated || params.has("onboarding")
-      || (fresh && !params.has("noonboarding") && !onboardingDone(get().vaultPath));
+      || (fresh && !params.has("noonboarding") && !done);
     set({ phase: snap ? "ready" : get().phase, onboarding: !!snap && onboarding });
     bindEvents();
     try {
@@ -173,8 +192,19 @@ export const useStore = create<State>((set, get) => {
     jobs: {},
     dropHover: false,
     onboarding: false,
+    unsubReasons: {},
+    setUnsubReasons(r) {
+      set((s) => {
+        const n = { ...s.unsubReasons };
+        for (const [id, v] of Object.entries(r)) { if (v) n[id] = v; else delete n[id]; }
+        return { unsubReasons: n };
+      });
+    },
     openOnboarding() { set({ onboarding: true }); },
-    closeOnboarding() { markOnboardingDone(get().vaultPath); set({ onboarding: false }); },
+    closeOnboarding() {
+      set({ onboarding: false });
+      if (!get().snap?.settings.onboarding_done) void api.settings.update({ onboarding_done: true }).catch(() => {});
+    },
     setAccountsFilter(f) { set({ accountsFilter: f }); },
 
     async boot() {
@@ -251,6 +281,17 @@ export const useStore = create<State>((set, get) => {
             } catch (e) { toast.error(errorMessage(e)); }
           },
         },
+      });
+    },
+    async setQueued(ids, queued, quiet) {
+      const accounts = get().snap?.accounts ?? [];
+      try { await api.sending.accountSetQueued(ids, queued); } catch (e) { toast.error(errorMessage(e)); return; }
+      if (quiet) return;
+      const one = ids.length === 1 ? accounts.find((a) => a.id === ids[0]) : undefined;
+      const who = one ? one.name : `${ids.length} Accounts`;
+      toast(queued ? `${who}: in der Warteschlange` : `${who}: aus der Warteschlange genommen`, {
+        duration: UNDO_MS,
+        action: { label: "Rückgängig", onClick: () => void api.sending.accountSetQueued(ids, !queued).catch((e) => toast.error(errorMessage(e))) },
       });
     },
     async setNotes(id, notes) {

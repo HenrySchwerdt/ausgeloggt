@@ -203,14 +203,17 @@ export function withPostUnsubscribeMails(subs: Subscription[]): Subscription[] {
 // Catalogue and reference data
 // ---------------------------------------------------------------------------------------------
 
+/** Services that only take requests by post (no mail address known). */
+const POST_ONLY = ["reddit.com", "etsy.com"];
+
 export function catalogInfo(domain: string | undefined, name: string | undefined): CatalogInfo {
   const d = (domain ?? "").toLowerCase();
   const n = name ?? d.split(".")[0] ?? "";
   const url = d === "sky.de" ? null : deletionUrl(d);
   const di: DeletionInfo = {
     name: n, domains: [d], url, difficulty: d === "sky.de" ? "Impossible" : difficultyFor(d), notes: NOTES[d] ?? null,
-    email: `datenschutz@${d}`, legal_name: `${n} GmbH`, address: "Datenschutzbeauftragter\nMusterstraße 1\n10115 Berlin",
-    privacy_email: `datenschutz@${d}`, slug: d.split(".")[0] ?? null, relevant_countries: ["DE"],
+    email: POST_ONLY.includes(d) ? null : `datenschutz@${d}`, legal_name: `${n} GmbH`, address: "Datenschutzbeauftragter\nMusterstraße 1\n10115 Berlin",
+    privacy_email: POST_ONLY.includes(d) ? null : `datenschutz@${d}`, slug: d.split(".")[0] ?? null, relevant_countries: ["DE"],
   };
   const known = !!d && !d.startsWith("unresolved");
   return {

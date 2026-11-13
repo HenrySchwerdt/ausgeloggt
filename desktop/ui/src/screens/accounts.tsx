@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, EyeOff, ListChecks, Search, ShieldCheck, UserX, Users, X } from "lucide-react";
+import { Check, EyeOff, ListChecks, Search, Send, ShieldCheck, UserX, Users, X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { navigate, useRoute } from "@/lib/router";
 import { headline, identifierLabel, isHidden, isWeak, shownIdentifiers, tierWord, toReview } from "@/lib/derive";
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { Tooltip } from "@/components/ui/tooltip";
 import { VirtualList } from "@/components/virtual-list";
+import { openBulkSend } from "@/components/bulk-send";
 
 type Filter = AccountStatus | "all" | "hidden";
 
@@ -121,6 +122,12 @@ export function AccountsPage() {
     await setStatus(ids, status);
   };
 
+  const sendable = useMemo(
+    () => snap.accounts.filter((a) => selected.has(a.id) && !["Keep", "Deleted", "NotAnAccount", "Ignored"].includes(a.status)).map((a) => a.id),
+    [snap.accounts, selected],
+  );
+  const canSend = snap.mailboxes.length > 0;
+
   const filtering = source !== "all" || sso !== "all" || query;
 
   return (
@@ -136,8 +143,9 @@ export function AccountsPage() {
               </Tooltip>
             ) : undefined}
           />
-          <div className="flex min-w-0 flex-col gap-2.5">
-            <div className="-mb-px max-w-full overflow-x-auto [scrollbar-width:none]">
+          <div className="flex min-w-0 flex-col gap-2.5 @container">
+            {/* Narrow (detail panel open): tabs scroll sideways, the fade shows there is more. */}
+            <div className="-mb-px max-w-full overflow-x-auto [scrollbar-width:none] @max-[700px]:[mask-image:linear-gradient(to_right,black_85%,transparent)] @max-[700px]:pr-10">
               <Segmented<Filter>
                 value={filter}
                 onChange={setFilter}
@@ -152,8 +160,8 @@ export function AccountsPage() {
                 ]}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-[140px] max-w-[280px] flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[180px] max-w-[280px] flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-fg-faint" />
                 <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, Domain oder Adresse" className="pl-8" />
               </div>
@@ -162,7 +170,7 @@ export function AccountsPage() {
               {filtering && <Button variant="ghost" onClick={() => { setSource("all"); setSso("all"); setQuery(""); }}>Zurücksetzen</Button>}
               {weakCount > 0 && (
                 <Tooltip content="Funde mit kaum Hinweisen, zum Beispiel nur Newsletter. Sie sind meist keine Accounts.">
-                  <label className="ml-auto flex cursor-default items-center gap-2 text-base text-fg-muted">
+                  <label className="ml-auto flex cursor-default items-center gap-2 whitespace-nowrap text-base text-fg-muted">
                     <Checkbox checked={showWeak} onCheckedChange={(v) => setShowWeak(v === true)} />
                     Unsichere zeigen ({nf(weakCount)})
                   </label>
@@ -183,7 +191,7 @@ export function AccountsPage() {
           <span className="min-w-0 flex-[1] basis-0">Account</span>
           <span className="hidden min-w-0 flex-[1.2] basis-0 @[640px]:block">Warum wir es glauben</span>
           <span className="w-[116px]">Status</span>
-          <span className="hidden w-[100px] text-right @[520px]:block">Einschätzung</span>
+          <span className="hidden w-[100px] text-right @[520px]:block">Wie sicher</span>
         </div>
 
         {rows.length === 0 ? (
@@ -222,7 +230,7 @@ export function AccountsPage() {
                     <Dot className={STATUS_COLOR[a.status]} />
                     <span className="truncate">{ACCOUNT_STATUS_LABEL[a.status]}</span>
                   </div>
-                  <div className={cn("hidden w-[100px] text-right text-base @[520px]:block", tierWord(a) === "Unsicher" ? "text-fg-faint" : "text-fg-muted")}>{tierWord(a)}</div>
+                  <div className={cn("hidden w-[100px] text-right text-base @[520px]:block", tierWord(a) === "Unklar" ? "text-fg-faint" : "text-fg-muted")}>{tierWord(a)}</div>
                 </div>
               );
             }}
@@ -237,6 +245,14 @@ export function AccountsPage() {
             <Tooltip content="Dort ist kein Account. Der Fund wird ausgeblendet."><Button variant="ghost" onClick={() => void bulk("NotAnAccount")}><UserX /> Kein Account</Button></Tooltip>
             <Tooltip content="Der Account bleibt bestehen und wird nicht mehr als offen gezählt."><Button variant="ghost" onClick={() => void bulk("Keep")}><ShieldCheck /> Behalten</Button></Tooltip>
             <Tooltip content="Der Eintrag verschwindet aus der Liste, ohne dass wir etwas dazu sagen."><Button variant="ghost" onClick={() => void bulk("Ignored")}><EyeOff /> Ausblenden</Button></Tooltip>
+            {canSend && sendable.length > 0 && (
+              <>
+                <span className="mx-1 h-4 w-px bg-border" />
+                <Tooltip content="Wir schreiben jedem Dienst einen Löschantrag und senden ihn von deinem Postfach. Vorher siehst du eine Übersicht.">
+                  <Button variant="secondary" onClick={() => { openBulkSend(sendable); setSelected(new Set()); }}><Send /> Löschanträge senden ({sendable.length})</Button>
+                </Tooltip>
+              </>
+            )}
             <span className="mx-1 h-4 w-px bg-border" />
             <Button variant="ghost" size="icon" aria-label="Auswahl aufheben" onClick={() => setSelected(new Set())}><X /></Button>
           </div>

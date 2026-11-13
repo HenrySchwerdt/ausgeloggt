@@ -159,9 +159,9 @@ function Heading({ title, children }: { title: string; children?: React.ReactNod
 /** Little picture made of the app's own pieces: a list of finds and the three answers. */
 function Illustration() {
   const rows = [
-    { n: "Spotify", d: "spotify.com", t: "Willkommensmail 2021", w: "Sicher" },
+    { n: "Spotify", d: "spotify.com", t: "Willkommensmail 2021", w: "Eindeutig" },
     { n: "Duolingo", d: "duolingo.com", t: "Mit Apple angemeldet", w: "Wahrscheinlich" },
-    { n: "Amazon", d: "amazon.de", t: "Bestellung 2022, Passwort in Chrome", w: "Sicher" },
+    { n: "Amazon", d: "amazon.de", t: "Bestellung 2022, Passwort in Chrome", w: "Eindeutig" },
   ];
   return (
     <div aria-hidden className="pointer-events-none select-none overflow-hidden rounded-lg border border-border">
@@ -180,7 +180,6 @@ function Illustration() {
         <span className="flex h-6 items-center rounded-md bg-muted px-2 text-sm font-medium">Kein Account</span>
         <span className="flex h-6 items-center rounded-md bg-muted px-2 text-sm font-medium">Weiß nicht</span>
         <span className="flex-1" />
-        <span className="flex items-center gap-1.5 text-sm text-fg-muted"><Dot className="bg-s-yellow" />Löschung läuft</span>
       </div>
     </div>
   );
@@ -191,15 +190,10 @@ function Welcome() {
     <>
       <Illustration />
       <Heading title="Willkommen bei ausgeloggt" />
-      <ol className="flex flex-col gap-3 text-base">
-        {[
-          "ausgeloggt findet heraus, wo du überall einen Account hast.",
-          "Du bestätigst jeden Fund mit einem Klick.",
-          "Danach löschst du Accounts und kündigst Abos, Schritt für Schritt.",
-        ].map((t, i) => (
-          <li key={t} className="flex gap-3"><span className="tnum w-4 text-fg-faint">{i + 1}</span><span>{t}</span></li>
-        ))}
-      </ol>
+      <p className="max-w-[460px] text-base leading-relaxed text-fg-muted">
+        ausgeloggt sucht in deinen Postfächern und Passwortexporten nach Accounts. Du bestätigst jeden Fund
+        und löschst oder kündigst danach in Ruhe. Alles bleibt verschlüsselt auf diesem Gerät.
+      </p>
     </>
   );
 }
@@ -221,8 +215,8 @@ function Privacy() {
     <>
       <Heading title="Deine Daten bleiben hier" />
       <div className="flex flex-col gap-5 border-t border-border pt-5">
-        <Fact icon={MailOpen} title="Wir lesen nur die Köpfe deiner Mails" text="Das sind Absender, Betreff und Datum. Der Inhalt bleibt ungelesen." />
-        <Fact icon={HardDrive} title="Nichts verlässt dieses Gerät" text="Alles liegt verschlüsselt in einer Datei auf deinem Rechner. Es gibt keinen Server und kein Konto bei uns." />
+        <Fact icon={MailOpen} title="Wir lesen nur Absender, Betreff und Datum" text="Der Inhalt deiner Mails bleibt ungelesen." />
+        <Fact icon={HardDrive} title="Deine Funde liegen verschlüsselt auf diesem Gerät" text="Es gibt keinen Server und kein Konto bei uns. Nur wenn du es einschaltest, geht etwas raus: ein Hashanfang von 5 Zeichen an Have I Been Pwned, Logos direkt von der Seite des Dienstes, Texte an Claude statt an das lokale Ollama." />
         <Fact icon={KeyRound} title="Das Hauptpasswort lässt sich nicht zurücksetzen" text="Wer es vergisst, verliert die Daten im Tresor. Bewahre es an einem sicheren Ort auf." />
       </div>
     </>

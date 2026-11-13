@@ -117,7 +117,6 @@ impl From<ausgeloggt_ai::AiError> for IpcError {
         use ausgeloggt_ai::AiError as A;
         let code = match &e {
             A::Disabled => ErrorCode::Invalid,
-            A::MissingApiKey => ErrorCode::Auth,
             A::OllamaUnreachable(_) | A::Request(_) => ErrorCode::Network,
             A::BadResponse(_) => ErrorCode::Internal,
         };

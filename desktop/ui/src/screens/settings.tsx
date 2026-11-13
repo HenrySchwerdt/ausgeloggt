@@ -8,7 +8,6 @@ import { useAsync } from "@/lib/hooks";
 import type { AiProvider, SettingsPatch } from "@/lib/types";
 import { cn, errorMessage } from "@/lib/utils";
 import { Dot, PageHeader } from "@/components/common";
-import { PageShell } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/input";
@@ -16,6 +15,8 @@ import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { confirm } from "@/components/confirm";
+import { Row, Section } from "@/components/settings-ui";
+import { AutomationSection, BackgroundSection } from "@/components/automation-settings";
 import { passwordStrength } from "./unlock";
 
 export const STATES: [string, string][] = [
@@ -24,27 +25,6 @@ export const STATES: [string, string][] = [
   ["DE-NW", "Nordrhein-Westfalen"], ["DE-RP", "Rheinland-Pfalz"], ["DE-SL", "Saarland"], ["DE-SN", "Sachsen"], ["DE-ST", "Sachsen-Anhalt"],
   ["DE-SH", "Schleswig-Holstein"], ["DE-TH", "Thüringen"],
 ];
-
-function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
-  return (
-    <section id={`s-${id}`} className="scroll-mt-6">
-      <h2 className="border-b border-border pb-2 text-lg font-semibold">{title}</h2>
-      <div className="flex flex-col">{children}</div>
-    </section>
-  );
-}
-
-function Row({ label, hint, children, stack }: { label: string; hint?: React.ReactNode; children: React.ReactNode; stack?: boolean }) {
-  return (
-    <div className={cn("flex gap-6 border-b border-border py-3 last:border-b-0", stack ? "flex-col gap-2" : "items-center justify-between max-md:flex-col max-md:items-stretch max-md:gap-2")}>
-      <div className="min-w-0 max-w-[460px]">
-        <div className="text-base">{label}</div>
-        {hint && <div className="mt-0.5 text-sm text-fg-muted">{hint}</div>}
-      </div>
-      <div className={cn("shrink-0", stack ? "w-full" : "w-[300px] max-md:w-full")}>{children}</div>
-    </div>
-  );
-}
 
 /** Text field that saves on blur. */
 function Field({ value, onSave, type = "text", placeholder, multiline }: { value: string; onSave(v: string): void; type?: string; placeholder?: string; multiline?: boolean }) {
@@ -56,7 +36,20 @@ function Field({ value, onSave, type = "text", placeholder, multiline }: { value
     : <Input type={type} value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />;
 }
 
+const SECTIONS: [string, string][] = [
+  ["identity", "Absender"], ["automation", "Automatik"], ["background", "Hintergrund"], ["general", "Sperre"],
+  ["security", "Datenlecks"], ["ai", "KI"], ["catalog", "Katalog"], ["vault", "Tresor und Daten"], ["about", "Über"],
+];
+
 export function SettingsPage({ section }: { section?: string }) {
+  const [activeSection, setActiveSection] = useState(SECTIONS[0]![0]);
+  const trackSection = (el: HTMLElement) => {
+    const top = el.getBoundingClientRect().top + 80;
+    let cur = SECTIONS[0]![0];
+    for (const [id] of SECTIONS) { const n = document.getElementById(`s-${id}`); if (n && n.getBoundingClientRect().top <= top) cur = id; }
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 4) cur = SECTIONS[SECTIONS.length - 1]![0];
+    setActiveSection(cur);
+  };
   const snap = useStore((s) => s.snap)!;
   const vaultPath = useStore((s) => s.vaultPath);
   const st = snap.settings;
@@ -69,20 +62,24 @@ export function SettingsPage({ section }: { section?: string }) {
   }, [section]);
 
   const [hibp, setHibp] = useState("");
-  const [anth, setAnth] = useState("");
   const [testing, setTesting] = useState(false);
   const [aiResult, setAiResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const models = useAsync(() => api.settings.aiModels(), [ai.provider, ai.ollama_url, ai.has_anthropic_key]);
+  const models = useAsync(() => api.settings.aiModels(), [ai.provider, ai.ollama_url]);
 
-  const secret = async (kind: "hibp" | "anthropic", v: string) => {
-    try { await api.settings.setSecret(kind, v); toast(v ? "Schlüssel gespeichert" : "Schlüssel entfernt"); kind === "hibp" ? setHibp("") : setAnth(""); } catch (e) { toast.error(errorMessage(e)); }
+  const secret = async (kind: "hibp", v: string) => {
+    try { await api.settings.setSecret(kind, v); toast(v ? "Schlüssel gespeichert" : "Schlüssel entfernt"); setHibp(""); } catch (e) { toast.error(errorMessage(e)); }
   };
   const test = async () => {
     setTesting(true); setAiResult(null);
     try { setAiResult({ ok: true, text: await api.settings.aiTest() }); } catch (e) { setAiResult({ ok: false, text: errorMessage(e) }); } finally { setTesting(false); }
   };
+  // Claude / ChatGPT: show the login state as soon as the page opens.
+  useEffect(() => {
+    if (ai.provider === "ClaudeCode" || ai.provider === "Codex") void test();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const exportJson = async () => {
     if (!(await confirm({ title: "Datenexport erstellen?", text: "Die JSON Datei ist nicht verschlüsselt und enthält alles aus deinem Tresor. Lege sie nur an einem sicheren Ort ab.", confirm: "Weiter" }))) return;
     try {
@@ -110,7 +107,18 @@ export function SettingsPage({ section }: { section?: string }) {
   const setId = (k: keyof typeof idn, v: string) => void save({ identity: { [k]: v } });
 
   return (
-    <PageShell className="max-w-[760px]">
+    <div className="h-full overflow-y-auto" onScroll={(e) => trackSection(e.currentTarget)}>
+    <div className="mx-auto flex w-full max-w-[1000px] gap-10 px-7 py-7">
+      <nav className="sticky top-7 hidden h-fit w-[170px] shrink-0 flex-col gap-0.5 pt-[52px] xl:flex" aria-label="Abschnitte">
+        {SECTIONS.map(([id, label]) => (
+          <button
+            key={id}
+            className={cn("h-7 rounded-md px-2 text-left text-base transition-colors hover:bg-muted", activeSection === id ? "bg-muted text-fg" : "text-fg-muted")}
+            onClick={() => document.getElementById(`s-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" })}
+          >{label}</button>
+        ))}
+      </nav>
+      <div className="flex min-w-0 max-w-[760px] flex-1 flex-col gap-7">
       <div ref={ref}><PageHeader title="Einstellungen" /></div>
 
       <Section id="identity" title="Absender für Briefe">
@@ -128,6 +136,9 @@ export function SettingsPage({ section }: { section?: string }) {
           <Select className="w-full" value={st.letter_language} onChange={(e) => void save({ letter_language: e.target.value as "de" | "en" })}><option value="de">Deutsch</option><option value="en">Englisch</option></Select>
         </Row>
       </Section>
+
+      <AutomationSection />
+      <BackgroundSection />
 
       <Section id="general" title="Sperre und Benachrichtigungen">
         <Row label="Automatisch sperren nach">
@@ -165,11 +176,15 @@ export function SettingsPage({ section }: { section?: string }) {
 
       <Section id="ai" title="KI">
         <Row label="Anbieter" hint="Optional. Hilft beim Einordnen von Newslettern und beim Lesen von Screenshots.">
-          <Segmented<AiProvider> value={ai.provider} onChange={(v) => { setAiResult(null); void save({ ai: { provider: v } }); }} options={[{ value: "Off", label: "Aus" }, { value: "Ollama", label: "Ollama" }, { value: "Anthropic", label: "Anthropic" }]} />
+          <Segmented<AiProvider>
+            value={ai.provider}
+            onChange={(v) => { setAiResult(null); void save({ ai: { provider: v } }).then(() => { if (v === "ClaudeCode" || v === "Codex") void test(); }); }}
+            options={[{ value: "Off", label: "Aus" }, { value: "Ollama", label: "Ollama" }, { value: "ClaudeCode", label: "Claude" }, { value: "Codex", label: "ChatGPT" }]}
+          />
         </Row>
         {ai.provider === "Ollama" && (
           <>
-            <Row label="Adresse von Ollama" hint="Läuft lokal. Nichts verlässt dein Gerät."><Field value={ai.ollama_url} onSave={(v) => void save({ ai: { ollama_url: v } })} /></Row>
+            <Row label="Adresse von Ollama" hint="Läuft lokal auf deinem Rechner."><Field value={ai.ollama_url} onSave={(v) => void save({ ai: { ollama_url: v } })} /></Row>
             <Row label="Modell" hint={models.error ? "Ollama ist nicht erreichbar." : undefined}>
               <Select className="w-full" value={ai.ollama_model} onChange={(e) => void save({ ai: { ollama_model: e.target.value } })}>
                 <option value="">Bitte wählen</option>
@@ -178,23 +193,14 @@ export function SettingsPage({ section }: { section?: string }) {
             </Row>
           </>
         )}
-        {ai.provider === "Anthropic" && (
-          <>
-            <Row label="Schlüssel" hint={<>{ai.has_anthropic_key ? "Schlüssel hinterlegt. " : ""}Die Cloud wird genutzt. Texte aus Mails verlassen dein Gerät.</>} stack>
-              <div className="flex gap-2">
-                <Input type="password" value={anth} onChange={(e) => setAnth(e.target.value)} placeholder={ai.has_anthropic_key ? "Neuen Schlüssel eingeben" : "Schlüssel einfügen"} autoComplete="off" />
-                <Button disabled={!anth.trim()} onClick={() => void secret("anthropic", anth.trim())}>Speichern</Button>
-                {ai.has_anthropic_key && <Button variant="ghost" onClick={() => void secret("anthropic", "")}>Entfernen</Button>}
-              </div>
-            </Row>
-            <Row label="Modell">
-              <Select className="w-full" value={ai.anthropic_model} onChange={(e) => void save({ ai: { anthropic_model: e.target.value } })}>
-                {[...new Set([ai.anthropic_model, ...modelList("text")])].map((m) => <option key={m} value={m}>{m}</option>)}
-              </Select>
-            </Row>
-          </>
+        {(ai.provider === "ClaudeCode" || ai.provider === "Codex") && (
+          <CliProviderRows
+            provider={ai.provider} result={aiResult} testing={testing} onTest={() => void test()}
+            model={ai.provider === "ClaudeCode" ? ai.claude_model : ai.codex_model}
+            onModel={(m) => void save({ ai: ai.provider === "ClaudeCode" ? { claude_model: m } : { codex_model: m } })}
+          />
         )}
-        {ai.provider !== "Off" && (
+        {ai.provider === "Ollama" && (
           <Row label="Verbindung" hint={aiResult ? <span className="inline-flex items-center gap-1.5"><Dot className={aiResult.ok ? "bg-s-green" : "bg-s-red"} />{aiResult.text}</span> : undefined}>
             <Button disabled={testing} onClick={() => void test()}>{testing && <Loader2 className="animate-spin" />} Testen</Button>
           </Row>
@@ -221,7 +227,9 @@ export function SettingsPage({ section }: { section?: string }) {
       </Section>
 
       <PasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
-    </PageShell>
+      </div>
+    </div>
+    </div>
   );
 }
 
@@ -254,5 +262,59 @@ function PasswordDialog({ open, onClose }: { open: boolean; onClose(): void }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const CLI_INFO = {
+  ClaudeCode: {
+    app: "Claude Code", account: "Claude Konto", company: "Anthropic", install: "https://claude.com/product/claude-code",
+    login: "Terminal öffnen, claude starten und mit deinem Claude Konto anmelden.",
+  },
+  Codex: {
+    app: "Codex", account: "ChatGPT Konto", company: "OpenAI", install: "https://developers.openai.com/codex/cli",
+    login: "Terminal öffnen und codex login ausführen.",
+  },
+} as const;
+
+/** Claude / ChatGPT through the local Claude Code / Codex app on the user's own account. */
+function CliProviderRows({ provider, model, onModel, result, testing, onTest }: {
+  provider: "ClaudeCode" | "Codex"; model: string; onModel(m: string): void;
+  result: { ok: boolean; text: string } | null; testing: boolean; onTest(): void;
+}) {
+  const info = CLI_INFO[provider];
+  return (
+    <>
+      <Row
+        label="Verbindung"
+        hint={
+          <span className="flex flex-col gap-1">
+            <span>Läuft über {info.app} mit deinem {info.account}. Kein Schlüssel nötig. Absender und Betreffzeilen gehen an {info.company}, Mailtexte nie.</span>
+            {testing && <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3 animate-spin" />Prüfe Anmeldung</span>}
+            {!testing && result && <span className="inline-flex items-start gap-1.5 text-fg"><Dot className={cn("mt-[7px]", result.ok ? "bg-s-green" : "bg-s-red")} />{result.text}</span>}
+            {!testing && result && !result.ok && (
+              <span>
+                {info.login}{" "}
+                <button className="text-fg underline underline-offset-2" onClick={() => void openUrl(info.install)}>{info.app} installieren</button>
+              </span>
+            )}
+          </span>
+        }
+      >
+        <Button disabled={testing} onClick={onTest}>{testing && <Loader2 className="animate-spin" />} Erneut prüfen</Button>
+      </Row>
+      {provider === "ClaudeCode" ? (
+        <Row label="Modell" hint="Haiku reicht zum Einordnen und ist am schnellsten.">
+          <Select className="w-full" value={model || "haiku"} onChange={(e) => onModel(e.target.value === "haiku" ? "" : e.target.value)}>
+            <option value="haiku">Haiku, schnell</option>
+            <option value="sonnet">Sonnet, gründlicher</option>
+            <option value="opus">Opus, am gründlichsten</option>
+          </Select>
+        </Row>
+      ) : (
+        <Row label="Modell" hint="Leer lassen, dann wählt Codex das Modell deines ChatGPT Plans.">
+          <Field value={model} onSave={(v) => onModel(v.trim())} placeholder="Standard" />
+        </Row>
+      )}
+    </>
   );
 }

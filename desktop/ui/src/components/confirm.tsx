@@ -17,6 +17,13 @@ export function ConfirmHost() {
   const [ask, setAsk] = useState<Ask | null>(null);
   useEffect(() => { push = setAsk; return () => { push = null; }; }, []);
   const close = (v: boolean) => { ask?.resolve(v); setAsk(null); };
+  // Navigating away counts as "Abbrechen".
+  useEffect(() => {
+    if (!ask) return;
+    const onNav = () => { ask.resolve(false); setAsk(null); };
+    window.addEventListener("hashchange", onNav);
+    return () => window.removeEventListener("hashchange", onNav);
+  }, [ask]);
   return (
     <Dialog open={!!ask} onOpenChange={(o) => !o && close(false)}>
       <DialogContent className="max-w-[420px]">

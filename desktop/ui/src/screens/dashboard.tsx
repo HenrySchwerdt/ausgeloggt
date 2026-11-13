@@ -4,7 +4,7 @@ import { navigate, href } from "@/lib/router";
 import { daysFromNow, de, money, formatDate, plural } from "@/lib/utils";
 import { isOverdue, requestDays, setupState } from "@/lib/derive";
 import { REQUEST_KIND_LABEL } from "@/lib/types";
-import { Dot, EmptyState, ErrorState, Figure, PageHeader, riskDot, SectionLabel, ServiceLogo } from "@/components/common";
+import { Dot, EmptyState, ErrorState, Figure, PageHeader, riskDot, riskLabel, SectionLabel, ServiceLogo } from "@/components/common";
 import { PageShell, Panel } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -154,7 +154,7 @@ export function Dashboard() {
 
       <div className="grid grid-cols-4 gap-6 max-lg:grid-cols-2 max-[620px]:grid-cols-1">
         <Figure
-          label="Datenschutz Score"
+          label="Datenschutzscore"
           value={sc.has_data ? <>{sc.score}<span className="ml-1 text-lg font-normal text-fg-faint">von 100</span></> : <span className="text-lg font-normal text-fg-muted">noch keine Daten</span>}
           hint={sc.has_data ? undefined : ""}
         />
@@ -181,7 +181,7 @@ export function Dashboard() {
                     <div className="truncate text-base font-medium leading-[18px]">{a.name}</div>
                     <div className="truncate text-sm leading-4 text-fg-muted">{de(r.next_step_de)}</div>
                   </div>
-                  <span className="flex items-center gap-2 text-sm text-fg-muted"><Dot className={riskDot(r.score)} /><span className="tnum">{r.score}</span></span>
+                  <span className="flex items-center gap-2 text-sm text-fg-muted"><Dot className={riskDot(r.score)} />{riskLabel(r.score)}</span>
                 </a>
               );
             })}

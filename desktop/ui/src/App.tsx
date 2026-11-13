@@ -10,6 +10,7 @@ import { Titlebar } from "@/components/titlebar";
 import { CommandPalette } from "@/components/palette";
 import { ConfirmHost } from "@/components/confirm";
 import { LetterHost, openLetter } from "@/components/letter-dialog";
+import { BulkSendHost } from "@/components/bulk-send";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UnlockScreen } from "@/screens/unlock";
@@ -97,6 +98,7 @@ export default function App() {
           </div>
           <CommandPalette />
           <LetterHost />
+          <BulkSendHost />
           <DropLayer />
         </div>
       )}

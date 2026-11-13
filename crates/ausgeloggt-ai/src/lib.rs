@@ -2,7 +2,8 @@
 //!
 //! Privacy: only sender name/address/domain and mail subjects are sent to the model,
 //! never bodies, never other identifiers. Ollama (local) is the recommended provider;
-//! Anthropic is opt-in. All calls are blocking with timeouts; call from worker threads.
+//! Claude (via Claude Code) and OpenAI (via Codex) are opt-in and run on the user's own
+//! login through the local CLIs, see [`cli`]. No API keys. All calls are blocking with timeouts; call from worker threads.
 //! Batched (e.g. 20 items per request) with strict JSON output, validated and
 //! falling back to "Unknown" on any parse problem.
 //!
@@ -15,6 +16,7 @@
 //! llama3.x, gemma, mistral; embedding models are never picked. Otherwise the first
 //! installed non-embedding model is used.
 
+pub mod cli;
 pub mod vision;
 
 use std::time::Duration;
@@ -26,9 +28,8 @@ use serde_json::{json, Value};
 pub const BATCH_SIZE: usize = 20;
 const MAX_SUBJECTS: usize = 5;
 const MAX_FIELD_CHARS: usize = 200;
-const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
-const DEFAULT_ANTHROPIC_MODEL: &str = "claude-haiku-5-5";
+/// Upper bound for one CLI turn (Claude Code / Codex start up in a few seconds).
+const CLI_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
@@ -36,8 +37,6 @@ pub enum AiError {
     Disabled,
     #[error("Ollama nicht erreichbar unter {0}. Läuft Ollama?")]
     OllamaUnreachable(String),
-    #[error("Kein API-Key hinterlegt")]
-    MissingApiKey,
     #[error("KI-Anfrage fehlgeschlagen: {0}")]
     Request(String),
     #[error("Ungültige KI-Antwort: {0}")]
@@ -87,16 +86,8 @@ pub fn test_provider(settings: &AiSettings) -> Result<String, AiError> {
             let models = ollama_models(&settings.ollama_url)?;
             Ok(format!("Ollama erreichbar, {} Modelle", models.len()))
         }
-        AiProvider::Anthropic => {
-            let key = api_key(settings)?;
-            let body = json!({
-                "model": anthropic_model(settings),
-                "max_tokens": 1,
-                "messages": [{"role": "user", "content": "ping"}],
-            });
-            transport::anthropic_post(key, &body, Duration::from_secs(60))?;
-            Ok("Anthropic API erreichbar".to_string())
-        }
+        AiProvider::ClaudeCode => cli::status(cli::Cli::Claude),
+        AiProvider::Codex => cli::status(cli::Cli::Codex),
     }
 }
 
@@ -204,7 +195,7 @@ const CATEGORY_NAMES: [&str; 6] = [
     "Unknown",
 ];
 
-/// JSON schema of the classification answer (Ollama `format`, Anthropic `input_schema`).
+/// JSON schema of the classification answer (Ollama `format`, CLI `--json-schema` / `--output-schema`).
 pub fn classification_schema() -> Value {
     json!({
         "type": "object",
@@ -465,21 +456,12 @@ pub fn pick_ollama_model(installed: &[String]) -> Option<String> {
 // Provider dispatch
 // ---------------------------------------------------------------------------
 
-fn api_key(settings: &AiSettings) -> Result<&str, AiError> {
-    let k = settings.anthropic_api_key.trim();
-    if k.is_empty() {
-        Err(AiError::MissingApiKey)
-    } else {
-        Ok(k)
-    }
-}
-
-fn anthropic_model(settings: &AiSettings) -> &str {
-    let m = settings.anthropic_model.trim();
-    if m.is_empty() {
-        DEFAULT_ANTHROPIC_MODEL
-    } else {
-        m
+/// The CLI and model for the cloud providers, `None` for Off / Ollama.
+pub(crate) fn cli_for(settings: &AiSettings) -> Option<(cli::Cli, &str)> {
+    match settings.provider {
+        AiProvider::ClaudeCode => Some((cli::Cli::Claude, settings.claude_model.as_str())),
+        AiProvider::Codex => Some((cli::Cli::Codex, settings.codex_model.as_str())),
+        AiProvider::Off | AiProvider::Ollama => None,
     }
 }
 
@@ -513,11 +495,10 @@ fn complete_json(
                 .ok_or_else(|| AiError::BadResponse("Ollama-Antwort ohne Inhalt".into()))?;
             extract_json(text)
         }
-        AiProvider::Anthropic => {
-            let key = api_key(settings)?;
-            let body = anthropic_body(anthropic_model(settings), system, user, schema_name, schema);
-            let resp = transport::anthropic_post(key, &body, Duration::from_secs(60))?;
-            extract_tool_input(&resp, schema_name)
+        AiProvider::ClaudeCode | AiProvider::Codex => {
+            let (c, model) = cli_for(settings).expect("cloud provider");
+            let _ = schema_name;
+            cli::complete(c, model, system, user, schema, None, CLI_TIMEOUT)
         }
     }
 }
@@ -534,43 +515,6 @@ pub fn ollama_chat_body(model: &str, system: &str, user: &str, schema: &Value) -
             {"role": "user", "content": user},
         ],
     })
-}
-
-/// Request body for Anthropic Messages with a forced single tool call.
-pub fn anthropic_body(
-    model: &str,
-    system: &str,
-    user: &str,
-    tool_name: &str,
-    schema: &Value,
-) -> Value {
-    json!({
-        "model": model,
-        "max_tokens": 4096,
-        "temperature": 0,
-        "system": system,
-        "messages": [{"role": "user", "content": user}],
-        "tools": [{
-            "name": tool_name,
-            "description": "Gibt das Ergebnis als strukturiertes JSON zurück.",
-            "input_schema": schema,
-        }],
-        "tool_choice": {"type": "tool", "name": tool_name},
-    })
-}
-
-/// Read the `input` of the `tool_use` block named `tool_name`.
-pub fn extract_tool_input(resp: &Value, tool_name: &str) -> Result<Value, AiError> {
-    resp.get("content")
-        .and_then(Value::as_array)
-        .and_then(|blocks| {
-            blocks.iter().find(|b| {
-                b.get("type").and_then(Value::as_str) == Some("tool_use")
-                    && b.get("name").and_then(Value::as_str) == Some(tool_name)
-            })
-        })
-        .and_then(|b| b.get("input").cloned())
-        .ok_or_else(|| AiError::BadResponse("kein tool_use-Block in der Antwort".into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -626,52 +570,6 @@ mod transport {
         }
         body.read_json()
             .map_err(|e| AiError::BadResponse(format!("Ollama: {e}")))
-    }
-
-    fn map_status(status: u16) -> AiError {
-        match status {
-            401 | 403 => AiError::Request(
-                "Der Anthropic-API-Key wurde abgelehnt (401). Bitte Key in den Einstellungen prüfen."
-                    .into(),
-            ),
-            429 | 529 | 503 => AiError::Request(
-                "Die Anthropic-API ist überlastet, bitte später erneut versuchen.".into(),
-            ),
-            s => AiError::Request(format!("Anthropic antwortete mit HTTP {s}")),
-        }
-    }
-
-    /// POST to Anthropic; one retry after a short backoff on 429/529/503.
-    pub fn anthropic_post(key: &str, body: &Value, global: Duration) -> Result<Value, AiError> {
-        let agent = agent(global);
-        for attempt in 0..2 {
-            let resp = agent
-                .post(ANTHROPIC_URL)
-                .header("x-api-key", key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
-                .header("content-type", "application/json")
-                .send_json(body)
-                .map_err(|e| match e {
-                    ureq::Error::Timeout(_) => {
-                        AiError::Request("Zeitüberschreitung bei der Anthropic-Anfrage".into())
-                    }
-                    // Error text could in theory echo request details; keep it generic.
-                    _ => AiError::Request("Anthropic-API nicht erreichbar".into()),
-                })?;
-            let (status, mut b) = split(resp);
-            if (200..300).contains(&status) {
-                return b
-                    .read_json()
-                    .map_err(|e| AiError::BadResponse(format!("Anthropic: {e}")));
-            }
-            if matches!(status, 429 | 529 | 503) && attempt == 0 {
-                log::info!("Anthropic HTTP {status}, neuer Versuch nach Pause");
-                std::thread::sleep(Duration::from_secs(3));
-                continue;
-            }
-            return Err(map_status(status));
-        }
-        Err(map_status(529))
     }
 }
 
@@ -842,22 +740,6 @@ mod tests {
         assert_eq!(b["stream"], json!(false));
         assert_eq!(b["options"]["temperature"], json!(0));
         assert!(b["format"].is_object());
-        let a = anthropic_body("m", "s", "u", "t", &judge_schema());
-        assert_eq!(a["tool_choice"], json!({"type":"tool","name":"t"}));
-        assert_eq!(a["tools"].as_array().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn anthropic_tool_input() {
-        let resp = json!({"content":[
-            {"type":"text","text":"hi"},
-            {"type":"tool_use","name":"t","input":{"probability":0.5,"reason":"r"}}]});
-        assert_eq!(
-            extract_tool_input(&resp, "t").unwrap()["probability"],
-            json!(0.5)
-        );
-        assert!(extract_tool_input(&resp, "other").is_err());
-        assert!(extract_tool_input(&json!({}), "t").is_err());
     }
 
     #[test]
@@ -873,10 +755,9 @@ mod tests {
             Err(AiError::Disabled)
         ));
         let a = AiSettings {
-            provider: AiProvider::Anthropic,
+            provider: AiProvider::ClaudeCode,
             ..AiSettings::default()
         };
-        assert!(matches!(test_provider(&a), Err(AiError::MissingApiKey)));
         // Empty input needs no request.
         let mut calls = 0;
         let r = classify_subscriptions(&a, &[], &mut |_, _| calls += 1).unwrap();

@@ -42,7 +42,7 @@ export function methodTag(m: DeletionMethod): string {
 
 export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
   Discovered: "Zu prüfen",
-  Confirmed: "Account",
+  Confirmed: "Bestätigt",
   Keep: "Behalten",
   DeletionPending: "Löschung läuft",
   Deleted: "Gelöscht",

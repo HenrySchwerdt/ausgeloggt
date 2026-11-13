@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
 import { openUrl } from "@/lib/platform";
+import { openDeletionPage } from "@/lib/actions";
 import { useAsync } from "@/lib/hooks";
 import {
   ACCOUNT_STATUS_LABEL, connectionsUrl, DIFFICULTY_LABEL, INTERVAL_LABEL, methodTag, paymentMethodLabel,
@@ -17,6 +18,7 @@ import { Dot, ServiceLogo, STATUS_COLOR } from "./common";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Textarea } from "./ui/input";
+import { Switch } from "./ui/switch";
 import { Tooltip } from "./ui/tooltip";
 import { openLetter } from "./letter-dialog";
 
@@ -58,6 +60,7 @@ function stepText(s: DeletionStep): string {
 export function AccountDetail({ account: a }: { account: Account }) {
   const setStatus = useStore((s) => s.setAccountStatus);
   const setNotes = useStore((s) => s.setNotes);
+  const setQueued = useStore((s) => s.setQueued);
   const snap = useStore((s) => s.snap)!;
   const insights = useStore((s) => s.insights);
   const requests = snap.requests;
@@ -96,11 +99,8 @@ export function AccountDetail({ account: a }: { account: Account }) {
   /** Open the service's deletion page (or write a request) and mark the deletion as running. */
   const startDelete = async () => {
     if (!del?.url) { letter("Erasure"); return; }
-    const prev = a.status;
     try {
-      await openUrl(del.url);
-      await api.accounts.addDeletionStep(a.id, { DirectLink: { url: del.url } }, "Löschseite geöffnet");
-      toast(`${a.name}: Löschung läuft`, { duration: 6000, action: { label: "Rückgängig", onClick: () => void api.accounts.setStatus([a.id], prev) } });
+      await openDeletionPage(a, del.url);
     } catch (e) { toast.error(errorMessage(e)); }
   };
   const to = (status: AccountStatus) => void setStatus([a.id], status);
@@ -185,12 +185,21 @@ export function AccountDetail({ account: a }: { account: Account }) {
             )}
             <div className="flex flex-wrap gap-2">
               {activeSub && !cancelAsked ? (
-                <Tip text="Wir bereiten die Kündigung vor. Danach kannst du den Account löschen."><Button variant="primary" onClick={() => letter("Cancellation")}>Kündigen und löschen</Button></Tip>
+                <Tip text="Wir bereiten die Kündigung vor. Danach entscheidest du, ob du den Account löschst."><Button variant="primary" onClick={() => letter("Cancellation")}>Kündigung schreiben</Button></Tip>
               ) : (
                 <Tip text="Was passiert beim Löschen? Wir öffnen die Löschseite des Dienstes. Danach markierst du es hier als erledigt."><Button variant="primary" onClick={() => void startDelete()}>Löschen {del?.url && <ExternalLink />}</Button></Tip>
               )}
               <Tip text="Der Account bleibt bestehen. Wir erinnern dich nicht mehr daran."><Button onClick={() => to("Keep")}>Behalten</Button></Tip>
             </div>
+            {snap.mailboxes.length > 0 && !(activeSub && !cancelAsked) && (
+              <div className="flex items-center gap-3 border-t border-border pt-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-base">Automatisch löschen lassen</div>
+                  <div className="text-sm text-fg-muted">{a.queued_for_deletion ? "In der Warteschlange. Der Antrag geht mit der nächsten Automatik raus." : "Wir senden den Löschantrag per Mail, sobald die Automatik läuft."}</div>
+                </div>
+                <Switch checked={!!a.queued_for_deletion} onCheckedChange={(v) => void setQueued([a.id], v)} aria-label="Automatisch löschen lassen" />
+              </div>
+            )}
           </div>
         )}
         {a.status === "DeletionPending" && (
@@ -205,7 +214,7 @@ export function AccountDetail({ account: a }: { account: Account }) {
                   <Button variant={overdue ? "primary" : "secondary"} onClick={() => openLetter({ args: { kind: "Reminder", requestId: sentRequest.id }, target: sentRequest.target, domain: sentRequest.domain ?? undefined, parentId: sentRequest.id })}>Nachfassen</Button>
                 </Tip>
               )}
-              <Tip text="Der Dienst hat den Account gelöscht oder es ist nichts mehr zu tun."><Button variant={overdue && sentRequest ? "secondary" : "primary"} onClick={() => to("Deleted")}><Check /> Ist gelöscht</Button></Tip>
+              <Tip text="Der Dienst hat den Account gelöscht oder es ist nichts mehr zu tun."><Button variant={overdue && sentRequest ? "secondary" : "primary"} onClick={() => to("Deleted")}><Check /> Löschung bestätigt</Button></Tip>
               {!sentRequest && del?.url && <Button variant="ghost" onClick={() => void openUrl(del.url!)}>Löschseite öffnen <ExternalLink /></Button>}
             </div>
           </div>
@@ -219,7 +228,7 @@ export function AccountDetail({ account: a }: { account: Account }) {
         {a.status === "Deleted" && (
           <div className="flex flex-col gap-3">
             <p className="text-base text-fg-muted">Dieser Account ist gelöscht.</p>
-            <div><Button onClick={() => to("Confirmed")}>Wiederherstellen</Button></div>
+            <div><Button onClick={() => to("Confirmed")}>Als offen markieren</Button></div>
           </div>
         )}
         {(a.status === "NotAnAccount" || a.status === "Ignored") && (
@@ -233,7 +242,7 @@ export function AccountDetail({ account: a }: { account: Account }) {
         )}
       </section>
 
-      {risk && risk.score > 0 && (a.status === "Keep" || (a.status === "Confirmed" && !activeSub)) && (
+      {risk && risk.score > 0 && (a.status === "Confirmed" && !activeSub) && (
         <div className="mx-5 mb-4 flex items-start gap-2 rounded-md bg-muted px-3 py-2 text-base">
           <Dot className={`mt-[7px] ${risk.score >= 60 ? "bg-s-red" : "bg-s-yellow"}`} />
           <span>{de(risk.next_step_de)}</span>
@@ -245,7 +254,7 @@ export function AccountDetail({ account: a }: { account: Account }) {
           <ul className="flex flex-col">
             {ids.map((id) => (
               <li key={id} className="group flex h-8 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg-muted" title={id}>{id}</span>
+                <span className="min-w-0 flex-1 truncate text-base text-fg-muted" title={id}>{id}</span>
                 <button aria-label="Kopieren" onClick={() => copy(id)} className="flex size-6 items-center justify-center rounded-md text-fg-faint opacity-0 transition hover:bg-muted hover:text-fg focus-visible:opacity-100 group-hover:opacity-100">
                   <Copy className="size-3.5" />
                 </button>
@@ -286,6 +295,11 @@ export function AccountDetail({ account: a }: { account: Account }) {
             dot={sec.has_2fa ? "bg-s-green" : cat?.two_factor ? "bg-s-yellow" : "bg-s-gray"} />
           {sec.phone_login && <KV k="Anmeldung" v="mit Telefonnummer" dot="bg-s-yellow" />}
         </div>
+        {(sec.password_pwned || (sec.password_reuse_count ?? 0) > 0) && !a.domain.startsWith("unresolved:") && (
+          <Button variant="ghost" size="sm" className="-ml-2 mt-1 h-7 text-base" onClick={() => void openUrl(`https://${a.domain}/.well-known/change-password`)}>
+            Passwort ändern <ExternalLink />
+          </Button>
+        )}
         {!sec.has_2fa && cat?.two_factor?.documentation && (
           <Button variant="ghost" size="sm" className="-ml-2 mt-1 h-7 text-base" onClick={() => void openUrl(cat.two_factor!.documentation!)}>
             2FA einrichten ({cat.two_factor.methods.slice(0, 2).join(", ")}) <ExternalLink />
@@ -322,7 +336,7 @@ export function AccountDetail({ account: a }: { account: Account }) {
           {billing.active_subscription && (
             <div className="mt-2 flex flex-wrap gap-2">
               {hub && <span className="text-base text-fg-muted">Läuft über {via}. Kündigen unter „{hub}“.</span>}
-              <Button variant="secondary" onClick={() => letter("Cancellation")}>Kündigung schreiben</Button>
+              {!(a.status === "Confirmed" && !cancelAsked) && <Button variant="secondary" onClick={() => letter("Cancellation")}>Kündigung schreiben</Button>}
             </div>
           )}
         </Section>

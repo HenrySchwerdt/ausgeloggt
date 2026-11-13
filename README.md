@@ -81,7 +81,7 @@ npm run tauri dev               # desktop app
 | `ausgeloggt-breach` | Have I Been Pwned: Pwned Passwords und Katalog der Datenlecks |
 | `ausgeloggt-catalog` | Löschkatalog, 2FA Verzeichnis, Auskunfteien, Behörden, Briefe zur Löschung |
 | `ausgeloggt-letters` | Briefe als PDF nach DIN 5008, digitaler Nachlass, Bericht zum Datenschutz |
-| `ausgeloggt-ai` | KI auf Wunsch über Ollama oder Anthropic, Import von Screenshots |
+| `ausgeloggt-ai` | KI auf Wunsch über Ollama, Claude oder ChatGPT (über Claude Code und Codex, ohne API Schlüssel), Import von Screenshots |
 | `desktop/` | Tauri 2 mit Oberfläche aus React, TypeScript und Tailwind |
 
 Mehr dazu in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) und [docs/DESIGN.md](docs/DESIGN.md).

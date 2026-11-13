@@ -2,12 +2,15 @@
 // Query switches: ?empty (empty vault), ?big=5000 (huge lists), ?noidentity (no sender data),
 // ?ai=ollama (AI enabled), ?fail=insights (one command fails, for error states).
 import { IpcError } from "../ipc";
-import type { MailboxDto, SettingsDto } from "../ipc";
+import type {
+  AutomationRule, BulkSendResult, ManualLinks, MailboxDto, SendCheck, SettingsDto, UnsubscribeFailureReason,
+} from "../ipc";
 import type { Backend } from "../api";
 import type {
-  Account, DataRequest, JobDone, JobId, JobKind, JobProgress, RequestKind, Snapshot,
+  Account, DataRequest, JobDone, JobId, JobKind, JobProgress, LetterArgs, RequestKind, Snapshot,
   Subscription,
 } from "../types";
+import { automationPreview } from "../automation";
 import { buildAccounts, buildRuns, buildSubscriptions, MAILBOXES } from "./data";
 import {
   buildRequests, catalogInfo, computeInsights, enrichAccounts, makeLetter, PRESETS, REFERENCE, withPostUnsubscribeMails,
@@ -55,31 +58,65 @@ export function createMockBackend(): Backend {
   let revision = 0;
   let password = "demo";
   const hasHibp = { v: false };
-  const hasAnthropic = { v: false };
 
   const settings: SettingsDto = {
     auto_lock_minutes: 10, min_confidence: 0.5, full_name: empty ? "" : "Lena Hartmann", letter_language: "de",
     allow_catalog_updates: true, dark_mode: true, fetch_logos: false,
-    ai: { provider: q.get("ai") === "ollama" ? "Ollama" : "Off", ollama_url: "http://127.0.0.1:11434", ollama_model: q.get("ai") === "ollama" ? "llama3.1:8b" : "", anthropic_model: "claude-haiku-5-5", has_anthropic_key: false },
+    ai: { provider: q.get("ai") === "ollama" ? "Ollama" : "Off", ollama_url: "http://127.0.0.1:11434", ollama_model: q.get("ai") === "ollama" ? "llama3.1:8b" : "", claude_model: "", codex_model: "" },
     identity: q.has("noidentity") || empty
       ? { street: "", postal_code: "", city: "", country: "Deutschland", state: "", birth_date: "", previous_addresses: [], phone: "", email: "" }
       : { street: "Lindenallee 12", postal_code: "80331", city: "München", country: "Deutschland", state: "DE-BY", birth_date: "1989-04-17", previous_addresses: ["Gartenstraße 3, 10115 Berlin"], phone: "", email: "lena.hartmann@gmail.com" },
     check_pwned_passwords: true, read_receipt_bodies: false, auto_rescan_days: 7, notifications: true, has_hibp_key: false,
+    send_gap_seconds: 20, daily_send_cap: 0, start_minimized_to_tray: false, autostart: false, keep_unlocked_for_automation: false,
+    onboarding_done: false,
   };
 
   const discover = q.has("discover");
   const baseAccounts = enrichAccounts(buildAccounts()).map((a) => (discover ? { ...a, status: "Discovered" as const } : a));
-  const baseSubs = withPostUnsubscribeMails(buildSubscriptions());
+  const baseSubs = withPostUnsubscribeMails(buildSubscriptions()).map((x, i) => (i % 2 === 0 ? { ...x, last_message_id: `<last-${i}@${x.domain}>` } : x));
   const mailboxes: MailboxDto[] = empty ? [] : MAILBOXES.map((address, i) => ({
     id: `m${i}`, address, imap_host: i ? "imap.web.de" : "imap.gmail.com", imap_port: 993, username: address,
     folders: ["INBOX"], progress: [{ folder: "INBOX", uid_validity: 1, last_uid: 18420 }], last_scan: ago(2), has_password: true,
   }));
   const accounts = empty ? [] : big > 0 ? bigAccounts(baseAccounts, big) : baseAccounts;
   const subs = empty ? [] : big > 0 ? bigSubs(baseSubs, big) : baseSubs;
+  const automationsInit: AutomationRule[] = empty || q.has("noauto") ? [] : [{
+    id: "auto0", mailbox_id: "m0", enabled: true, every_days: 7, hour: 9, rescan: true, send_erasure_for_queue: true,
+    send_reminders: true, prepare_complaints: true, last_run: ago(3), last_result: "Postfach geprüft, 1 Löschantrag gesendet, 2 Erinnerungen gesendet",
+  }];
   let snap: Snapshot = {
     schema: 1, accounts, runs: empty ? [] : buildRuns(), mailboxes, settings, subscriptions: subs,
-    requests: empty ? [] : buildRequests(accounts, subs),
+    requests: empty ? [] : buildRequests(accounts, subs).map((r) => (r.channel === "Email" && r.status === "Sent" ? { ...r, mailbox_id: "m0" } : r)), automations: automationsInit,
   };
+  // Mails sent today per mailbox (rate limit state) and the time of the last one (gap).
+  const sentToday: Record<string, number> = { m0: 3, m1: 0 };
+  let lastSentAt = 0;
+  const capOf = (id: string) => {
+    const cap = snap.settings.daily_send_cap ?? 0;
+    if (cap > 0) return cap;
+    return snap.mailboxes.find((m) => m.id === id)?.address.endsWith("@gmail.com") ? 100 : 40;
+  };
+  const remaining = (id: string) => Math.max(0, capOf(id) - (sentToday[id] ?? 0));
+  const gap = () => snap.settings.send_gap_seconds ?? 20;
+  const LETTER_REQUEST: Record<string, RequestKind> = {
+    Erasure: "Erasure", Access: "Access", ObjectionAndAccess: "Objection", Cancellation: "Cancellation", Reminder: "Reminder", Complaint: "Complaint",
+    CeaseAndDesist: "CeaseAndDesist", CreditBureauAccess: "CreditBureauAccess", AddressBrokerObjection: "AdvertisingObjection",
+  };
+  const BULK_KINDS = ["Erasure", "Access", "ObjectionAndAccess", "Cancellation"];
+
+  /** Why a letter cannot be sent from this mailbox, or the letter. */
+  function prepareSend(a: LetterArgs, mailboxId: string): { ok: true; target: string; to: string; subject: string; body: string; deadline: string | null } | { ok: false; reason: string } {
+    const mb = snap.mailboxes.find((m) => m.id === mailboxId);
+    if (!mb) return { ok: false, reason: "Postfach nicht gefunden" };
+    if (!mb.has_password) return { ok: false, reason: "Für dieses Postfach ist kein Passwort gespeichert" };
+    const p = makeLetter(snap, a);
+    if (p.missing_sender_fields.length) return { ok: false, reason: `Deine Angaben fehlen: ${p.missing_sender_fields.join(", ")}` };
+    const to = p.recipient_email?.trim();
+    if (!to) return { ok: false, reason: "Für diesen Empfänger ist keine Mailadresse bekannt. Bitte den Brief als PDF speichern und per Post senden" };
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { ok: false, reason: "Die Mailadresse des Empfängers ist ungültig" };
+    const acc = a.accountId ? snap.accounts.find((x) => x.id === a.accountId) : undefined;
+    return { ok: true, target: acc?.name ?? p.recipient.name, to, subject: p.subject, body: p.text, deadline: p.deadline };
+  }
 
   // ---- events ----
   const listeners: Record<string, Set<Listener>> = {};
@@ -108,7 +145,8 @@ export function createMockBackend(): Backend {
   const running = new Map<JobId, { kind: JobKind; done: number; total: number; cancel: boolean }>();
   function startJob(kind: JobKind, work: (c: Ctx) => Promise<Omit<JobDone, "jobId" | "kind">>): JobId {
     needUnlocked();
-    if ([...running.values()].some((j) => j.kind === kind)) throw new IpcError("Busy", "Dieser Vorgang läuft bereits.");
+    const group = (k: JobKind) => (k === "send" || k === "automation" ? "send" : k);
+    if ([...running.values()].some((j) => group(j.kind) === group(kind))) throw new IpcError("Busy", "Dieser Vorgang läuft bereits.");
     const jobId = newId();
     const job = { kind, done: 0, total: 0, cancel: false };
     running.set(jobId, job);
@@ -149,6 +187,62 @@ export function createMockBackend(): Backend {
       tags: [], notes: "", deletion: [], created_at: now, updated_at: now, payments: [],
       security: { password_reuse_count: null, password_pwned: null, has_2fa: null, phone_login: false, breaches: [], checked_at: null },
     };
+  }
+
+  /** Dry run for a bulk send: the same checks as the backend, in the same order. */
+  function planCheck(items: { kind: LetterArgs["kind"]; accountId: string; recipient?: LetterArgs["recipient"] }[], mailboxId: string): SendCheck {
+    const ok: SendCheck["ok"] = [];
+    const problems: SendCheck["problems"] = [];
+    const seen = new Set<string>();
+    for (const it of items) {
+      const kind = LETTER_REQUEST[it.kind]!;
+      let reason: string | null = null;
+      if (!BULK_KINDS.includes(it.kind)) reason = "Diese Art von Brief ist für den Sammelversand nicht vorgesehen";
+      else if (seen.has(`${it.accountId}:${kind}`)) reason = "Dieser Account ist in der Auswahl doppelt enthalten";
+      else if (snap.requests.some((r) => r.account_id === it.accountId && r.kind === kind && r.status !== "Draft")) reason = "Für diesen Account gibt es bereits einen gesendeten Antrag";
+      seen.add(`${it.accountId}:${kind}`);
+      if (!reason) {
+        const p = prepareSend({ kind: it.kind, accountId: it.accountId, recipient: it.recipient }, mailboxId);
+        if (p.ok) ok.push({ accountId: it.accountId, name: p.target, recipientEmail: p.to, subject: p.subject });
+        else reason = p.reason;
+      }
+      if (reason) problems.push({ accountId: it.accountId, reason });
+    }
+    return { ok, problems, remainingToday: remaining(mailboxId), dailyCap: capOf(mailboxId), gapSeconds: gap() };
+  }
+
+  /** Send one letter: gap, SMTP, counters, request record. Throws the German reason on failure. */
+  async function sendOne(c: Ctx, args: LetterArgs, mailboxId: string, attachPdf: boolean, index: number, total: number, label = "") {
+    if (remaining(mailboxId) <= 0) throw new IpcError("Invalid", `Das Tageslimit von ${capOf(mailboxId)} Mails für dieses Postfach ist erreicht. Morgen geht es weiter`);
+    const p = prepareSend(args, mailboxId);
+    if (!p.ok) throw new IpcError("Invalid", p.reason);
+    const wait = lastSentAt ? Math.max(0, gap() * 1000 - (Date.now() - lastSentAt)) : 0;
+    if (wait > 0) {
+      c.progress(index, total, `Wartet ${Math.ceil(wait / 1000)} Sekunden wegen des Sendelimits`);
+      await sleep(Math.min(wait, 500));
+    }
+    if (c.cancelled()) throw new IpcError("Internal", "Abgebrochen");
+    c.progress(index, total, label ? `Mail an ${label} wird gesendet` : "Mail wird gesendet");
+    await sleep(label ? 450 : 800);
+    lastSentAt = Date.now();
+    sentToday[mailboxId] = (sentToday[mailboxId] ?? 0) + 1;
+    const kind = LETTER_REQUEST[args.kind]!;
+    const month: RequestKind[] = ["Erasure", "Access", "Objection", "CreditBureauAccess", "AdvertisingObjection"];
+    const short: RequestKind[] = ["CeaseAndDesist", "Reminder", "Cancellation"];
+    const acc = args.accountId ? snap.accounts.find((x) => x.id === args.accountId) : undefined;
+    const parent = args.requestId ? snap.requests.find((x) => x.id === args.requestId) : undefined;
+    const req: DataRequest = {
+      id: newId(), kind, target: p.target, domain: acc?.domain ?? parent?.domain ?? null, account_id: args.accountId ?? parent?.account_id ?? null,
+      subscription_id: args.subscriptionId ?? null, parent_id: kind === "Reminder" || kind === "Complaint" ? args.requestId ?? null : null,
+      channel: "Email", recipient: p.to, subject: p.subject, body: p.body, created_at: new Date().toISOString(), sent_at: new Date().toISOString(),
+      deadline: month.includes(kind) ? inDays(30) : short.includes(kind) ? inDays(14) : null, status: "Sent", notes: "",
+      message_id: `<${newId()}@ausgeloggt.local>`, mailbox_id: mailboxId, attachment: attachPdf ? `${args.kind}_${p.target}.pdf` : null,
+    };
+    commit((s) => ({
+      ...s, requests: [req, ...s.requests],
+      accounts: s.accounts.map((a) => (a.id === args.accountId && kind === "Erasure" ? { ...a, queued_for_deletion: false } : a)),
+    }));
+    return { requestId: req.id, messageId: req.message_id!, sentAt: req.sent_at! };
   }
 
   const api: Backend = {
@@ -258,6 +352,7 @@ export function createMockBackend(): Backend {
             ...s,
             accounts: s.accounts.some((a) => a.domain === "wolt.com") ? s.accounts : [newAcc, ...s.accounts],
             mailboxes: s.mailboxes.map((m) => (ids2.has(m.id) ? { ...m, last_scan: new Date().toISOString() } : m)),
+            subscriptions: s.subscriptions.map((x) => (targets.some((m) => m.address === x.mailbox) && !x.last_message_id ? { ...x, last_message_id: `<last-${x.id}@${x.domain}>` } : x)),
             runs: [...targets.map((m) => ({ id: newId(), source: { Mail: { mailbox: m.address } }, started_at: ago(0.01), finished_at: new Date().toISOString(), items_scanned: 3120, findings: 61, new_accounts: 1, error: null })), ...s.runs],
           }));
           return {
@@ -330,16 +425,21 @@ export function createMockBackend(): Backend {
       async unsubscribeStart(ids) {
         return startJob("unsubscribe", async (c) => {
           const items = snap.subscriptions.filter((s) => ids.includes(s.id));
-          const results: { id: string; ok: boolean; skipped: boolean; message: string }[] = [];
+          const results: { id: string; ok: boolean; skipped: boolean; message: string; reason: UnsubscribeFailureReason | null }[] = [];
           let n = 0;
           for (const s of items) {
             if (c.cancelled()) break;
             n++;
             const auto = s.unsubscribe.some((m) => !("Link" in m)) && s.category !== "Transactional";
             const failed = auto && n % 7 === 0;
-            const r = { id: s.id, ok: auto && !failed, skipped: !auto, message: !auto ? "Nur Link, bitte selbst öffnen" : failed ? "Server antwortet mit Fehler 503" : "Abgemeldet" };
+            const why: UnsubscribeFailureReason = (["Http", "Network", "Refused"] as const)[Math.floor(n / 7) % 3]!;
+            const r = {
+              id: s.id, ok: auto && !failed, skipped: !auto,
+              message: !auto ? "Nur Link, bitte selbst öffnen" : failed ? (why === "Http" ? "Server antwortet mit Fehler 503" : why === "Network" ? "Server nicht erreichbar" : "Abmeldung abgelehnt") : "Abgemeldet",
+              reason: !auto ? ("NoAutomaticMethod" as const) : failed ? why : null,
+            };
             results.push(r);
-            c.progress(n, items.length, s.name, { id: s.id, ok: r.ok, message: r.message });
+            c.progress(n, items.length, s.name, { id: s.id, ok: r.ok, message: r.message, reason: r.reason } as JobProgress["item"]);
             await sleep(180);
           }
           const okIds = new Set(results.filter((r) => r.ok).map((r) => r.id));
@@ -416,20 +516,28 @@ export function createMockBackend(): Backend {
       },
       async setSecret(kind, value) {
         await lat(30);
-        if (kind === "hibp") hasHibp.v = !!value; else hasAnthropic.v = !!value;
-        commit((s) => ({ ...s, settings: { ...s.settings, has_hibp_key: hasHibp.v, ai: { ...s.settings.ai, has_anthropic_key: hasAnthropic.v } } }));
+        if (kind === "hibp") hasHibp.v = !!value;
+        commit((s) => ({ ...s, settings: { ...s.settings, has_hibp_key: hasHibp.v } }));
       },
       async aiTest() {
         await lat(900);
         if (snap.settings.ai.provider === "Off") throw new IpcError("Invalid", "Die KI ist ausgeschaltet.");
-        if (snap.settings.ai.provider === "Anthropic" && !hasAnthropic.v) throw new IpcError("Auth", "Es ist kein Schlüssel hinterlegt.");
-        return snap.settings.ai.provider === "Ollama" ? `Verbunden, ${snap.settings.ai.ollama_model || "Modell"} antwortet.` : "Verbunden, Claude antwortet.";
+        const p = snap.settings.ai.provider;
+        // ?cli=nologin simulates a Claude Code / Codex that is not signed in.
+        if ((p === "ClaudeCode" || p === "Codex") && q.get("cli") === "nologin") {
+          throw new IpcError("Network", p === "ClaudeCode"
+            ? "Claude Code ist nicht angemeldet. Öffne ein Terminal, starte claude und melde dich mit deinem Claude Konto an."
+            : "Codex ist nicht angemeldet. Öffne ein Terminal und führe codex login aus.");
+        }
+        if (p === "ClaudeCode") return "Claude Code ist mit deinem Claude Konto angemeldet";
+        if (p === "Codex") return "Codex ist mit deinem ChatGPT Konto angemeldet";
+        return `Verbunden, ${snap.settings.ai.ollama_model || "Modell"} antwortet.`;
       },
       async aiModels() {
         await lat(300);
         const p = snap.settings.ai.provider;
         if (p === "Ollama") return { text: ["llama3.1:8b", "qwen2.5:7b", "mistral:7b"], vision: ["llava:13b", "qwen2.5vl:7b"] };
-        if (p === "Anthropic") return { text: ["claude-haiku-5-5", "claude-sonnet-5-5"], vision: ["claude-sonnet-5-5"] };
+        if (p === "ClaudeCode") return { text: ["haiku", "sonnet", "opus"], vision: ["haiku", "sonnet", "opus"] };
         return { text: [], vision: [] };
       },
       async catalogRefreshStart() {
@@ -439,6 +547,145 @@ export function createMockBackend(): Backend {
         });
       },
       async generatePdfKit() { await lat(500); },
+    },
+    sending: {
+      async letterSend(a) {
+        needUnlocked();
+        return startJob("send", async (c) => {
+          c.progress(0, 1, "Brief wird vorbereitet");
+          await sleep(350);
+          const args: LetterArgs = { kind: a.kind, accountId: a.accountId, subscriptionId: a.subscriptionId, requestId: a.requestId, orgId: a.orgId, authorityState: a.authorityState, recipient: a.recipient };
+          const out = await sendOne(c, args, a.mailboxId, a.attachPdf, 0, 1);
+          const gmail = snap.mailboxes.find((m) => m.id === a.mailboxId)?.address.endsWith("@gmail.com");
+          return {
+            ok: true, summary: "Mail gesendet. Eine Kopie liegt im Ordner Gesendet.",
+            payload: { requestId: out.requestId, messageId: out.messageId, sentAt: out.sentAt, appendedTo: gmail ? null : "Gesendet", appendError: null },
+          };
+        });
+      },
+      async lettersSendCheck(items, mailboxId) {
+        await lat(260);
+        return planCheck(items, mailboxId);
+      },
+      async lettersSendBulk(items, mailboxId, attachPdf) {
+        needUnlocked();
+        return startJob("send", async (c) => {
+          const plan = planCheck(items, mailboxId);
+          const bad = new Map(plan.problems.map((p) => [p.accountId, p.reason]));
+          const results: BulkSendResult["results"] = [];
+          let sent = 0, failed = 0, skipped = 0, capReached = false;
+          for (let i = 0; i < items.length; i++) {
+            const it = items[i]!;
+            const name = snap.accounts.find((x) => x.id === it.accountId)?.name ?? it.accountId;
+            if (c.cancelled()) break;
+            const why = bad.get(it.accountId);
+            if (why) {
+              skipped++;
+              results.push({ id: it.accountId, ok: false, skipped: true, message: why, reason: "Skipped" });
+              c.progress(i + 1, items.length, name, { id: it.accountId, ok: false, message: why });
+              continue;
+            }
+            if (capReached || remaining(mailboxId) <= 0) {
+              const first = !capReached;
+              capReached = true; skipped++;
+              results.push({ id: it.accountId, ok: false, skipped: true, message: "Tageslimit erreicht", reason: first ? "CapReached" : "Blocked" });
+              continue;
+            }
+            try {
+              await sendOne(c, { kind: it.kind, accountId: it.accountId, recipient: it.recipient }, mailboxId, attachPdf, i, items.length, name);
+              sent++;
+              results.push({ id: it.accountId, ok: true, skipped: false, message: "Gesendet", reason: null });
+              c.progress(i + 1, items.length, name, { id: it.accountId, ok: true, message: "Gesendet" });
+            } catch (e) {
+              failed++;
+              const m = IpcError.from(e).message;
+              results.push({ id: it.accountId, ok: false, skipped: false, message: m, reason: "SendFailed" });
+              c.progress(i + 1, items.length, name, { id: it.accountId, ok: false, message: m });
+            }
+          }
+          const payload: BulkSendResult = { sent, failed, skipped, capReached, results };
+          return { ok: failed === 0 && !capReached, summary: `${sent} gesendet${failed ? `, ${failed} fehlgeschlagen` : ""}${skipped ? `, ${skipped} übersprungen` : ""}`, payload };
+        });
+      },
+      async accountSetQueued(ids, queued) { await lat(30); patchAccounts(ids, (a) => ({ ...a, queued_for_deletion: queued })); },
+    },
+    automations: {
+      async list() { await lat(30); return snap.automations ?? []; },
+      async upsert(rule) {
+        await lat(60);
+        const list = snap.automations ?? [];
+        if (![1, 7, 14, 30].includes(rule.every_days)) throw new IpcError("Invalid", "Ungültiges Intervall");
+        const other = list.find((r) => r.mailbox_id === rule.mailbox_id && r.id !== rule.id);
+        if (other) throw new IpcError("Invalid", "Für dieses Postfach gibt es schon eine Regel");
+        const id = rule.id ?? newId();
+        const prev = list.find((r) => r.id === id);
+        const next: AutomationRule = { ...rule, id, last_run: prev?.last_run ?? null, last_result: prev?.last_result ?? "" };
+        commit((s) => ({ ...s, automations: prev ? (s.automations ?? []).map((r) => (r.id === id ? next : r)) : [...(s.automations ?? []), next] }));
+        return id;
+      },
+      async remove(id) { await lat(40); commit((s) => ({ ...s, automations: (s.automations ?? []).filter((r) => r.id !== id) })); },
+      async runNow(id) {
+        needUnlocked();
+        return startJob("automation", async (c) => {
+          const rule = (snap.automations ?? []).find((r) => r.id === id);
+          if (!rule) throw new IpcError("NotFound", "Regel nicht gefunden");
+          const mb = snap.mailboxes.find((m) => m.id === rule.mailbox_id);
+          if (!mb) throw new IpcError("NotFound", "Postfach nicht gefunden");
+          const parts: string[] = [];
+          let failed = 0;
+          if (rule.rescan) {
+            for (let i = 1; i <= 5; i++) { if (c.cancelled()) break; c.progress(i, 10, `${mb.address}: Postfach wird geprüft`); await sleep(300); }
+            parts.push("Postfach geprüft");
+          }
+          if (rule.send_erasure_for_queue) {
+            const mine = automationPreview(snap, mb).queue;
+            let n = 0;
+            for (const a of mine) {
+              if (c.cancelled() || remaining(mb.id) <= 0) break;
+              c.progress(5 + n, 10, `Löschantrag an ${a.name}`);
+              try { await sendOne(c, { kind: "Erasure", accountId: a.id }, mb.id, true, n, mine.length, a.name); n++; } catch { failed++; }
+            }
+            if (n || failed) parts.push(`${n} ${n === 1 ? "Löschantrag" : "Löschanträge"} gesendet`);
+          }
+          if (rule.send_reminders) {
+            const due = automationPreview(snap, mb).reminders;
+            let n = 0;
+            for (const r of due) {
+              if (c.cancelled() || remaining(mb.id) <= 0) break;
+              c.progress(8, 10, `Erinnerung an ${r.target}`);
+              try { await sendOne(c, { kind: "Reminder", requestId: r.id }, mb.id, false, n, due.length, r.target); n++; } catch { failed++; }
+            }
+            if (n) parts.push(`${n} ${n === 1 ? "Erinnerung" : "Erinnerungen"} gesendet`);
+          }
+          const summary = parts.length ? parts.join(", ") : "Nichts zu tun";
+          const at = new Date().toISOString();
+          commit((st) => ({ ...st, automations: (st.automations ?? []).map((r) => (r.id === id ? { ...r, last_run: at, last_result: summary } : r)) }));
+          return { ok: failed === 0, summary, payload: { runs: [{ ruleId: id, summary, failed }] } };
+        });
+      },
+      async autostartSet(enabled) { await lat(60); commit((s) => ({ ...s, settings: { ...s.settings, autostart: enabled } })); },
+    },
+    unsubscribeFallback: {
+      async manualLinks(subscriptionId, fromMail = false) {
+        await lat(fromMail ? 1100 : 60);
+        const sub = snap.subscriptions.find((x) => x.id === subscriptionId);
+        if (!sub) throw new IpcError("NotFound", "Newsletter nicht gefunden");
+        const links: ManualLinks["links"] = [];
+        let mailto: string | undefined;
+        for (const m of sub.unsubscribe) {
+          if ("Link" in m) links.push({ url: m.Link.url, source: "header", label: "Abmeldelink des Absenders" });
+          else if ("OneClick" in m) links.push({ url: m.OneClick.url, source: "header", label: "Abmeldeadresse des Absenders" });
+          else mailto = m.Mailto.address;
+        }
+        if (fromMail) {
+          if (!sub.last_message_id) throw new IpcError("Invalid", "Von dieser Liste ist keine Mail gespeichert. Bitte das Postfach erneut scannen");
+          links.push(
+            { url: `https://${sub.domain}/newsletter/abmelden`, source: "mail", label: "Link am Ende der letzten Mail" },
+            { url: `https://${sub.domain}/konto/einstellungen/benachrichtigungen`, source: "mail", label: "Maileinstellungen im Kundenkonto" },
+          );
+        }
+        return { links, mailto };
+      },
     },
     jobs: {
       async cancel(jobId) { const j = running.get(jobId); if (j) j.cancel = true; },

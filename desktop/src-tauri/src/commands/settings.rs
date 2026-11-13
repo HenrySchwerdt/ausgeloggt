@@ -25,7 +25,6 @@ pub async fn secret_set(state: State<'_, AppState>, kind: String, value: String)
     }
     state.try_mutate(|d| {
         match kind.as_str() {
-            "anthropic" => d.settings.ai.anthropic_api_key = value,
             "hibp" => d.settings.hibp_api_key = value,
             _ => return Err(IpcError::invalid("Unbekannte Art von Schlüssel")),
         }

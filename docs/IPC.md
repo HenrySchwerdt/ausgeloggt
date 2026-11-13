@@ -10,8 +10,9 @@ Conventions
   `{ "code": "VaultLocked" | "WrongPassword" | "NotFound" | "Invalid" | "Network" | "Auth" | "Busy" | "Io" | "Internal", "message": "<German, user-facing>" }`.
 - Long-running work returns a `JobId` (string) immediately and reports via events (below). Never block the main thread.
 - After any mutation the backend emits `vault://changed` `{ "revision": u64 }`; the UI refetches what it shows.
-- Secrets never cross IPC towards the UI: mailbox passwords, Anthropic and HIBP keys are write-only.
-  Snapshots carry `has_password` / `has_anthropic_key` / `has_hibp_key` flags instead.
+- Secrets never cross IPC towards the UI: mailbox passwords and the HIBP key are write-only.
+  Snapshots carry `has_password` / `has_hibp_key` flags instead. AI needs no key: Claude and ChatGPT run
+  through the local Claude Code / Codex CLIs on the user's own login (`ausgeloggt_ai::cli`).
 - The vault is saved after every mutation (debounced ≤ 500 ms) and on lock / exit.
 
 ## Vault
@@ -141,7 +142,7 @@ has passed; missed runs happen once, not repeatedly. While the vault is locked n
 `settings.keep_unlocked_for_automation` is on and an automation is enabled (the UI must warn that this keeps the vault readable in
 memory).
 
-Tray and autostart: tray icon with Öffnen, Jetzt prüfen (runs all enabled automations now), Sperren, Beenden. Closing the window hides
+Tray and autostart: tray icon with Öffnen, Jetzt scannen (rescans all mailboxes, sends nothing), Sperren, Beenden. Closing the window hides
 to the tray when any automation is enabled or `settings.start_minimized_to_tray`; otherwise the app quits as before.
 
 Unsubscribe job results (`unsubscribe_start`) carry a machine readable failure `reason` per item (progress `item.reason` and
@@ -155,9 +156,9 @@ Job kinds `send` and `automation` are mutually exclusive (`Busy`), so two jobs n
 | Command | Args | Returns |
 |---|---|---|
 | `settings_update` | `{ patch }` = deep partial `SettingsDto` with snake_case keys (objects merge, arrays replace; secrets and `has_*` flags are ignored) | `()` |
-| `secret_set` | `{ kind: "anthropic" \| "hibp", value }` | `()` |
+| `secret_set` | `{ kind: "hibp", value }` | `()` |
 | `ai_test` | – | `string` |
-| `ai_models` | – | `{ text: string[], vision: string[] }` (Ollama: installed models; Anthropic: fixed list; Off: empty) |
+| `ai_models` | – | `{ text: string[], vision: string[] }` (Ollama: installed models; ClaudeCode: `haiku`/`sonnet`/`opus`; Codex and Off: empty) |
 | `catalog_refresh_start` | – | `JobId` |
 | `generate_pdf_kit` | `{ kind: "legacy" \| "report", path }` | `()` |
 

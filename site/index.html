@@ -45,7 +45,7 @@
   <div class="cta"><a class="btn primary" href="https://github.com/HenrySchwerdt/ausgeloggt">Auf GitHub ansehen</a><a class="btn" href="#download">Download</a></div>
 </div>
 <div class="wrap"><div class="shot">
-  <picture class="theme-dark"><source srcset="assets/shots/dashboard.webp" type="image/webp"><img src="assets/shots/dashboard.png" width="1440" height="900" alt="Die Übersicht von ausgeloggt mit 73 gefundenen Accounts, Fristen und zuletzt gefundenen Diensten" fetchpriority="high" decoding="async"></picture><picture class="theme-light"><source srcset="assets/shots/dashboard-light.webp" type="image/webp"><img src="assets/shots/dashboard-light.png" width="1440" height="900" alt="Die Übersicht von ausgeloggt im hellen Design" loading="lazy" decoding="async"></picture>
+  <picture class="theme-dark"><source srcset="assets/shots/dashboard.webp" type="image/webp"><img src="assets/shots/dashboard.png" width="1440" height="900" alt="Die Übersicht von ausgeloggt: nächster Schritt, Datenschutzscore, größte Risiken, nächste Abbuchungen und überfällige Anträge" fetchpriority="high" decoding="async"></picture><picture class="theme-light"><source srcset="assets/shots/dashboard-light.webp" type="image/webp"><img src="assets/shots/dashboard-light.png" width="1440" height="900" alt="Die Übersicht von ausgeloggt im hellen Design" loading="lazy" decoding="async"></picture>
   <div class="toast" id="toast" data-items='[{&quot;g&quot;: &quot;spotify&quot;, &quot;t&quot;: &quot;Löschantrag für Spotify erstellt&quot;}, {&quot;g&quot;: &quot;adobe&quot;, &quot;t&quot;: &quot;Adobe: Frist seit 3 Tagen überfällig&quot;}, {&quot;g&quot;: &quot;zalando&quot;, &quot;t&quot;: &quot;Löschlink für Zalando gefunden&quot;}]' role="status" aria-live="off"><svg class="glyph" aria-hidden="true"><use href="#g-spotify"/></svg><span>Löschantrag für Spotify erstellt</span></div>
 </div></div></section>
 
@@ -97,7 +97,7 @@
   </div>
   <div class="copy">
     <h2>Liest nur Kopfzeilen deiner Mails.</h2>
-    <p>Das Postfach wird nur lesend geöffnet, per IMAP, direkt von deinem Rechner. Der Text einer Mail bleibt zu. Nur bei Rechnungen liest die App mehr, und nur wenn du zustimmst.</p>
+    <p>Zum Suchen wird das Postfach nur lesend geöffnet, per IMAP, direkt von deinem Rechner. Der Text einer Mail bleibt zu. Nur bei Rechnungen liest die App mehr, und nur wenn du zustimmst.</p>
     <p>Aus Absender und Betreff erkennt sie Willkommensmails, Bestätigungen, Passwortresets und Anmeldehinweise. Daran sieht sie, wo du einen Account hast.</p>
   </div>
 </div></div></section>
@@ -122,6 +122,7 @@
   <div class="copy">
     <h2>Briefe als PDF nach DIN 5008.</h2>
     <p>Sie passen ins Fensterkuvert. Name, Adresse und Kennungen setzt die App ein, bei Unterlassungen auch die Mails als Beleg. Fristen zählt sie mit.</p>
+    <p>Oder die App sendet den Antrag von deinem Postfach, mit PDF im Anhang und Kopie in Gesendet. Du siehst jede Mail vorher. Schweigt ein Anbieter über die Frist hinaus, erinnert ihn die Automatik.</p>
     <ul class="kinds">
       <li>Löschung, Art. 17 DSGVO</li><li>Auskunft, Art. 15 DSGVO</li><li>Widerspruch</li><li>Kündigung</li><li>Unterlassung mit Beleg</li><li>Selbstauskunft bei SCHUFA und Co.</li><li>Beschwerde bei der Datenschutzbehörde</li>
     </ul>
@@ -132,8 +133,9 @@
   <h2 style="margin-bottom:40px">Technik</h2>
   <dl class="facts">
     <dt>Tresor</dt><dd>Argon2id, XChaCha20-Poly1305. Eine verschlüsselte Datei, kein Konto.</dd>
-    <dt>Mail</dt><dd>IMAP, nur lesend, nur Kopfzeilen. TLS über rustls.</dd>
+    <dt>Mail</dt><dd>IMAP zum Suchen, nur Kopfzeilen. SMTP nur, wenn du einen Antrag sendest. TLS über rustls.</dd>
     <dt>Netzwerk</dt><dd>Dein Mailserver. Optional: Have I Been Pwned, Katalogupdate.</dd>
+    <dt>KI</dt><dd>Optional. Ollama auf deinem Rechner, Claude über Claude Code oder ChatGPT über Codex, jeweils mit deinem eigenen Konto. Kein API Schlüssel.</dd>
     <dt>Telemetrie</dt><dd>Keine.</dd>
     <dt>Katalog</dt><dd>Löschlinks für rund 2.700 Dienste.</dd>
     <dt>Stack</dt><dd>Rust, Tauri 2, React.</dd>
@@ -144,9 +146,14 @@
 
 <section class="sec" id="download"><div class="wrap"><div class="split">
   <div class="copy">
-    <h2>Noch kein Download.</h2>
-    <p>ausgeloggt ist in früher Entwicklung. Das Backend ist fertig und getestet, die Oberfläche läuft noch mit Beispieldaten. Installer gibt es noch nicht.</p>
-    <p><a class="btn primary" href="https://github.com/HenrySchwerdt/ausgeloggt"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/></svg>Entwicklung auf GitHub verfolgen</a></p>
+    <h2>Testversion 0.2</h2>
+    <p>Eine frühe Version zum Ausprobieren. Sie ist noch nicht signiert: Windows zeigt beim ersten Start einen SmartScreen Hinweis, auf dem Mac öffnest du sie per Rechtsklick und Öffnen.</p>
+    <dl class="facts dl">
+      <dt>Windows</dt><dd><a href="https://github.com/HenrySchwerdt/ausgeloggt/releases/download/v0.2.0-alpha.1/ausgeloggt_0.2.0_x64-setup.exe">Installer (.exe)</a></dd>
+      <dt>macOS</dt><dd><a href="https://github.com/HenrySchwerdt/ausgeloggt/releases/download/v0.2.0-alpha.1/ausgeloggt_0.2.0_universal.dmg">Apple Silicon und Intel (.dmg)</a></dd>
+      <dt>Linux</dt><dd><a href="https://github.com/HenrySchwerdt/ausgeloggt/releases/download/v0.2.0-alpha.1/ausgeloggt_0.2.0_amd64.AppImage">AppImage</a>, <a href="https://github.com/HenrySchwerdt/ausgeloggt/releases/download/v0.2.0-alpha.1/ausgeloggt_0.2.0_amd64.deb">.deb</a>, <a href="https://github.com/HenrySchwerdt/ausgeloggt/releases/download/v0.2.0-alpha.1/ausgeloggt-0.2.0-1.x86_64.rpm">.rpm</a></dd>
+      <dt>Alle Versionen</dt><dd><a href="https://github.com/HenrySchwerdt/ausgeloggt/releases">Releases auf GitHub</a></dd>
+    </dl>
   </div>
   <div class="code" role="group" aria-label="Selbst bauen"><span class="c"># Selbst bauen (Rust, Node.js 20, Voraussetzungen von Tauri)</span>
 git clone https://github.com/HenrySchwerdt/ausgeloggt.git
@@ -157,7 +164,7 @@ npm run tauri dev</div>
 
 <section class="sec" id="faq"><div class="wrap">
   <h2 style="margin-bottom:40px">FAQ</h2>
-  <div class="faq"><details><summary>Welche Mailanbieter funktionieren?</summary><div class="a"><p>Gmail, GMX, WEB.DE, iCloud, Yahoo, T-Online, Posteo, mailbox.org, Fastmail, AOL, freenet.de und Proton Mail über die Bridge. Eigene Server mit IMAP gehen auch. Mehrere Anbieter verlangen ein App Passwort, die App erklärt dir, wo du es erstellst.</p></div></details><details><summary>Geht Outlook?</summary><div class="a"><p>Noch nicht. Microsoft lässt für IMAP keine Anmeldung per Passwort mehr zu, nötig ist OAuth. Das ist geplant. Bis dahin kannst du Outlook Accounts über Passwortexporte und Datenexporte finden lassen.</p></div></details><details><summary>Welche Passwortmanager werden gelesen?</summary><div class="a"><p>Exporte aus Chrome, Firefox, Safari, Edge, Bitwarden, 1Password, KeePass, LastPass, Proton Pass und Dashlane. Dazu Datenexporte von Facebook und Google Takeout.</p></div></details><details><summary>Ist das erlaubt?</summary><div class="a"><p>Ja. Die DSGVO gibt dir ein Recht auf Auskunft (Art. 15) und Löschung (Art. 17). ausgeloggt schreibt die Anträge, abschicken musst du sie selbst. Die Briefe sind Entwürfe und keine Rechtsberatung.</p></div></details><details><summary>Brauche ich eine KI?</summary><div class="a"><p>Nein. Optional liest ein lokales Modell über Ollama Screenshots von Anmeldelisten. Die Claude API ist nur auf Wunsch aktiv und bekommt ausschließlich geschwärzte Absender und Betreffzeilen, nie Mailtexte.</p></div></details><details><summary>Was kostet es?</summary><div class="a"><p>Nichts. Die App steht unter der MIT Lizenz, braucht kein Konto, und der Quellcode liegt auf <a href="https://github.com/HenrySchwerdt/ausgeloggt">GitHub</a>.</p></div></details></div>
+  <div class="faq"><details><summary>Welche Mailanbieter funktionieren?</summary><div class="a"><p>Gmail, GMX, WEB.DE, iCloud, Yahoo, T-Online, Posteo, mailbox.org, Fastmail, AOL, freenet.de und Proton Mail über die Bridge. Eigene Server mit IMAP gehen auch. Mehrere Anbieter verlangen ein App Passwort, die App erklärt dir, wo du es erstellst.</p></div></details><details><summary>Geht Outlook?</summary><div class="a"><p>Noch nicht. Microsoft lässt für IMAP keine Anmeldung per Passwort mehr zu, nötig ist OAuth. Das ist geplant. Bis dahin kannst du Outlook Accounts über Passwortexporte und Datenexporte finden lassen.</p></div></details><details><summary>Welche Passwortmanager werden gelesen?</summary><div class="a"><p>Exporte aus Chrome, Firefox, Safari, Edge, Bitwarden, 1Password, KeePass, LastPass, Proton Pass und Dashlane. Dazu Datenexporte von Facebook und Google Takeout.</p></div></details><details><summary>Ist das erlaubt?</summary><div class="a"><p>Ja. Die DSGVO gibt dir ein Recht auf Auskunft (Art. 15) und Löschung (Art. 17). ausgeloggt schreibt die Anträge. Du schickst sie per Post oder lässt sie von deinem Postfach senden, jeweils erst nach deiner Bestätigung. Die Briefe sind Vorlagen und keine Rechtsberatung.</p></div></details><details><summary>Brauche ich eine KI?</summary><div class="a"><p>Nein. Auf Wunsch hilft eine KI beim Einordnen von Newslettern und liest Screenshots von Anmeldelisten. Das geht lokal mit Ollama oder mit deinem Claude oder ChatGPT Konto über Claude Code und Codex. Einen API Schlüssel brauchst du nicht. Die KI bekommt nur geschwärzte Absender und Betreffzeilen, nie Mailtexte.</p></div></details><details><summary>Was kostet es?</summary><div class="a"><p>Nichts. Die App steht unter der MIT Lizenz, braucht kein Konto, und der Quellcode liegt auf <a href="https://github.com/HenrySchwerdt/ausgeloggt">GitHub</a>.</p></div></details></div>
 </div></section>
 </main>
 

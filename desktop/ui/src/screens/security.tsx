@@ -12,7 +12,9 @@ import { PageShell, Panel } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface Row { a: Account; detail: string; dot: string }
+interface Row { a: Account; detail: string; dot: string; changePw?: boolean }
+
+const realDomain = (a: Account) => !a.domain.startsWith("unresolved:") && a.domain.includes(".");
 
 function Issue({ title, rows, empty, hint }: { title: string; rows: Row[]; empty?: string; hint?: string }) {
   const [all, setAll] = useState(false);
@@ -24,11 +26,17 @@ function Issue({ title, rows, empty, hint }: { title: string; rows: Row[]; empty
       </SectionLabel>
       {hint && <p className="mt-0.5 text-base text-fg-muted">{hint}</p>}
       <Panel className="mt-1.5">
-        {rows.length === 0 ? <div className="flex h-11 items-center gap-2 px-3 text-base text-fg-muted"><Dot className="bg-s-green" />{empty ?? "Nichts gefunden"}</div> : shown.map(({ a, detail, dot }) => (
+        {rows.length === 0 ? <div className="flex h-11 items-center gap-2 px-3 text-base text-fg-muted"><Dot className="bg-s-green" />{empty ?? "Nichts gefunden"}</div> : shown.map(({ a, detail, dot, changePw }) => (
           <a key={a.id} href={href({ page: "accounts", id: a.id })} className="flex h-11 items-center gap-3 border-b border-border px-3 transition-colors last:border-b-0 hover:bg-muted">
             <ServiceLogo name={a.name} domain={a.domain} />
             <span className="min-w-0 flex-1 truncate text-base font-medium">{a.name}</span>
             <span className="flex max-w-[55%] items-center gap-2 truncate text-sm text-fg-muted"><Dot className={dot} /><span className="truncate">{detail}</span></span>
+            {changePw && realDomain(a) && (
+              <Button
+                size="sm" className="ml-1"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openUrl(`https://${a.domain}/.well-known/change-password`); }}
+              >Passwort ändern <ExternalLink /></Button>
+            )}
           </a>
         ))}
       </Panel>
@@ -64,12 +72,12 @@ export function SecurityPage() {
   const no2fa = reason("No2faButSupported"), phone = reason("PhoneLogin"), foreign = reason("ForeignRecoveryAddress");
   const byId = new Map(snap.accounts.map((a) => [a.id, a]));
 
-  const pwned: Row[] = open.filter((a) => a.security.password_pwned).map((a) => ({ a, detail: "Passwort in einem Leak gefunden", dot: "bg-s-red" }));
+  const pwned: Row[] = open.filter((a) => a.security.password_pwned).map((a) => ({ a, detail: "Passwort in einem Leak gefunden", dot: "bg-s-red", changePw: true }));
   const reused: Row[] = open.filter((a) => (a.security.password_reuse_count ?? 0) > 0).sort((x, y) => (y.security.password_reuse_count ?? 0) - (x.security.password_reuse_count ?? 0))
-    .map((a) => ({ a, detail: `auch bei ${plural(a.security.password_reuse_count!, "anderem Dienst", "anderen Diensten")} genutzt`, dot: "bg-s-yellow" }));
+    .map((a) => ({ a, detail: `auch bei ${plural(a.security.password_reuse_count!, "anderem Dienst", "anderen Diensten")} genutzt`, dot: "bg-s-yellow", changePw: true }));
   const breached: Row[] = open.filter((a) => a.security.breaches.length > 0).map((a) => {
     const b = a.security.breaches[0]!;
-    return { a, detail: `${b.title}${b.breach_date ? ` ${new Date(b.breach_date).getFullYear()}` : ""}${b.confirmed_for_user ? ", deine Adresse betroffen" : ""}`, dot: a.security.breaches.some((x) => x.confirmed_for_user) ? "bg-s-red" : "bg-s-yellow" };
+    return { a, detail: `${b.title}${b.breach_date ? ` ${new Date(b.breach_date).getFullYear()}` : ""}${b.confirmed_for_user ? ", deine Adresse betroffen" : ""}`, dot: a.security.breaches.some((x) => x.confirmed_for_user) ? "bg-s-red" : "bg-s-yellow", changePw: a.security.breaches.some((x) => x.confirmed_for_user) };
   }).sort((x, y) => (x.dot === "bg-s-red" ? 0 : 1) - (y.dot === "bg-s-red" ? 0 : 1));
   const rowsFor = (set: Set<string>, detail: string): Row[] => [...set].map((id) => byId.get(id)).filter((a): a is Account => !!a).map((a) => ({ a, detail, dot: "bg-s-yellow" }));
   const aliasRows: Row[] = ins.aliases.map((x) => ({ a: byId.get(x.account_id)!, detail: x.current_identifier, dot: "bg-s-gray" })).filter((r) => r.a);

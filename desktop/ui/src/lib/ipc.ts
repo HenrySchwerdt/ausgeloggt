@@ -12,7 +12,7 @@
 // - Every command rejects with an `IpcError` (see below), never with a bare string.
 // - Long work returns a `JobId`; progress and completion arrive as events (`onJobProgress`,
 //   `onJobDone`) or through `runJob`.
-// - Secrets are write-only: mailbox passwords, the Anthropic and the HIBP key never come back.
+// - Secrets are write-only: mailbox passwords and the HIBP key never come back.
 //   Read the `has_*` flags instead.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -319,7 +319,8 @@ export interface DataRequest {
   notes: string;
 }
 
-export type AiProvider = "Off" | "Ollama" | "Anthropic";
+/** Claude and ChatGPT run through the local Claude Code / Codex apps on the user's own login. */
+export type AiProvider = "Off" | "Ollama" | "ClaudeCode" | "Codex";
 
 export interface Identity {
   street: string;
@@ -339,13 +340,15 @@ export interface Identity {
 // DTOs: what actually crosses the IPC boundary (secrets removed)
 // ============================================================================
 
-/** `AiSettings` without the Anthropic key, plus a flag. */
+/** `AiSettings`. No secrets: Claude Code and Codex use their own login. */
 export interface AiSettingsDto {
   provider: AiProvider;
   ollama_url: string;
   ollama_model: string;
-  anthropic_model: string;
-  has_anthropic_key: boolean;
+  /** Claude Code alias (`haiku`, `sonnet`, `opus`); empty = `haiku`. */
+  claude_model: string;
+  /** Codex model; empty = Codex default. */
+  codex_model: string;
 }
 
 /** `Settings` without both API keys, plus flags. */
@@ -370,7 +373,7 @@ export interface SettingsDto {
 export type SettingsPatch = {
   [K in keyof Omit<SettingsDto, "has_hibp_key" | "ai" | "identity">]?: SettingsDto[K];
 } & {
-  ai?: Partial<Omit<AiSettingsDto, "has_anthropic_key">>;
+  ai?: Partial<AiSettingsDto>;
   identity?: Partial<Identity>;
 };
 
@@ -689,7 +692,9 @@ export type JobKind =
   | "ai_classify"
   | "screenshot_read"
   | "breach_check"
-  | "catalog_refresh";
+  | "catalog_refresh"
+  | "send"
+  | "automation";
 
 export interface JobItem {
   id: string;
@@ -744,7 +749,7 @@ export interface UnsubscribeDonePayload {
   ok: number;
   failed: number;
   skipped: number;
-  results: { id: Uuid; ok: boolean; skipped: boolean; message: string }[];
+  results: { id: Uuid; ok: boolean; skipped: boolean; message: string; reason?: UnsubscribeFailureReason | null }[];
 }
 export interface ClassifyDonePayload {
   checked: number;
@@ -782,7 +787,7 @@ export interface AiModels {
   vision: string[];
 }
 
-export type SecretKind = "anthropic" | "hibp";
+export type SecretKind = "hibp";
 export type PdfKitKind = "legacy" | "report";
 
 // ============================================================================
@@ -1012,6 +1017,8 @@ export interface SettingsDto {
   autostart?: boolean;
   /** Skip auto-lock while an automation is enabled. Weakens protection, show a warning. */
   keep_unlocked_for_automation?: boolean;
+  /** The first run wizard was completed or dismissed (stored in the vault). */
+  onboarding_done?: boolean;
 }
 
 export interface SnapshotDto {

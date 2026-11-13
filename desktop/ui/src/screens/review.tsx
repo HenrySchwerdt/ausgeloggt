@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, ListChecks, Undo2 } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { queueChoice, useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
 import { isTyping } from "@/lib/hooks";
 import { identifierLabel, isWeak, reasonsOf, reviewOrder, shownIdentifiers, tierWord, toReview } from "@/lib/derive";
@@ -8,6 +8,7 @@ import { plural } from "@/lib/utils";
 import { EmptyState, SectionLabel, ServiceLogo } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip } from "@/components/ui/tooltip";
 
@@ -20,8 +21,14 @@ const MAX_REASONS = 5;
 export function ReviewPage() {
   const snap = useStore((s) => s.snap)!;
   const setStatus = useStore((s) => s.setAccountStatus);
+  const setQueued = useStore((s) => s.setQueued);
   const byId = useMemo(() => new Map(snap.accounts.map((a) => [a.id, a])), [snap.accounts]);
   const multi = snap.mailboxes.length > 1;
+  const sender = snap.mailboxes.find((m) => m.has_password);
+  const [ask, setAsk] = useState<string | null>(null);
+  const [remember, setRemember] = useState(true);
+  const [qc, setQc] = useState(queueChoice.value);
+  const resetQueueChoice = () => { queueChoice.value = null; setQc(null); };
 
   // The queue is fixed when the page opens, so decisions do not reshuffle it. Strongest first.
   const [queue, setQueue] = useState<string[]>(() => reviewOrder(toReview(snap.accounts)).map((a) => a.id));
@@ -42,12 +49,27 @@ export function ReviewPage() {
     const status = choice === "yes" ? "Confirmed" : choice === "no" ? "NotAnAccount" : null;
     if (status) chain.current = chain.current.then(() => setStatus([a.id], status, true));
     setHistory((h) => [...h, { index: i, id: a.id, choice }]);
+    if (choice === "yes" && sender) {
+      if (queueChoice.value === null) { setAsk(a.id); return; }
+      if (queueChoice.value === "yes") chain.current = chain.current.then(() => setQueued([a.id], true, true));
+    }
     setI(i + 1);
+  };
+
+  /** Second step after "Ja, hab ich": queue the erasure request for the automation, or not. */
+  const answerQueue = (queue: boolean) => {
+    if (!ask) return;
+    const id = ask;
+    if (remember) { queueChoice.value = queue ? "yes" : "no"; setQc(queueChoice.value); }
+    if (queue) chain.current = chain.current.then(() => setQueued([id], true, true));
+    setAsk(null);
+    setI((n) => n + 1);
   };
 
   const undo = () => {
     const last = history[history.length - 1];
     if (!last) return;
+    setAsk(null);
     if (last.choice !== "skip") chain.current = chain.current.then(() => setStatus([last.id], "Discovered", true));
     setHistory((h) => h.slice(0, -1));
     setI(last.index);
@@ -63,14 +85,20 @@ export function ReviewPage() {
     setQueue((q) => [...q, ...skipped]);
   };
 
-  const fns = useRef({ decide, undo });
-  fns.current = { decide, undo };
+  const fns = useRef({ decide, undo, answerQueue, ask });
+  fns.current = { decide, undo, answerQueue, ask };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.altKey || e.metaKey || document.querySelector("[role=dialog],[role=menu],[cmdk-root]")) return;
       const k = e.key.toLowerCase();
       if (e.ctrlKey) { if (k === "z") { e.preventDefault(); fns.current.undo(); } return; }
       if (e.repeat) return;
+      if (fns.current.ask) {
+        if (k === "1" || k === "j") fns.current.answerQueue(true);
+        else if (k === "2" || k === "n" || k === "escape" || k === " ") { e.preventDefault(); fns.current.answerQueue(false); }
+        else if (k === "z" || k === "u" || k === "backspace") fns.current.undo();
+        return;
+      }
       if (k === "escape") navigate({ page: "dashboard" });
       else if (k === "1" || k === "j") fns.current.decide("yes");
       else if (k === "2" || k === "n") fns.current.decide("no");
@@ -142,6 +170,7 @@ export function ReviewPage() {
     );
   }
 
+  const upcoming = queue.slice(i + 1, i + 4).map((x) => byId.get(x)).filter((x): x is NonNullable<typeof x> => !!x);
   const reasons = reasonsOf(a, multi);
   const shown = reasons.slice(0, MAX_REASONS);
   const ids = shownIdentifiers(a, snap);
@@ -151,8 +180,8 @@ export function ReviewPage() {
     <div className="flex h-full flex-col">
       {head}
       <div className="px-7 pt-4"><Progress value={total ? i / total : 0} /></div>
-      <div className="flex flex-1 items-center justify-center overflow-y-auto px-7 py-8">
-        <div key={a.id} className="anim-pop flex w-full max-w-[560px] flex-col gap-6">
+      <div className="flex flex-1 justify-center overflow-y-auto px-7 pb-10 pt-[clamp(24px,7vh,72px)]">
+        <div key={a.id} className="anim-pop flex h-fit w-full max-w-[640px] flex-col gap-7">
           <div className="flex items-center gap-4">
             <ServiceLogo name={a.name} domain={a.domain} size={48} />
             <div className="min-w-0 flex-1">
@@ -162,14 +191,14 @@ export function ReviewPage() {
                 {ids.length > 0 && <span className="text-fg-faint">, {identifierLabel(ids[0]!)}{ids.length > 1 ? ` und ${ids.length - 1} weitere` : ""}</span>}
               </div>
             </div>
-            <Tooltip content="Wie sicher wir sind, dass du hier einen Account hast. Sicher: mehrere klare Hinweise. Unsicher: kaum Hinweise.">
+            <Tooltip content="Wie sicher wir sind, dass du hier einen Account hast. Eindeutig: mehrere klare Hinweise. Unklar: kaum Hinweise.">
               <span className="text-base text-fg-muted">{tierWord(a)}</span>
             </Tooltip>
           </div>
 
           <section>
             <SectionLabel>Warum wir das glauben</SectionLabel>
-            <ul className="mt-2 flex flex-col gap-2.5 border-t border-border pt-3">
+            <ul className="mt-2 flex flex-col gap-3.5 border-t border-border pt-4">
               {shown.map((r) => (
                 <li key={r.text + r.detail} className="flex items-start gap-3">
                   <span className="mt-[9px] size-[5px] shrink-0 rounded-full bg-fg-faint" />
@@ -184,21 +213,58 @@ export function ReviewPage() {
             </ul>
           </section>
 
-          <div className="flex flex-col gap-3 border-t border-border pt-5">
+          {ask === a.id ? (
+            <div className="anim-fade flex flex-col gap-3 border-t border-border pt-6">
+              <p className="text-lg font-medium">Löschantrag für {a.name} automatisch senden?</p>
+              <p className="max-w-[520px] text-base text-fg-muted">
+                Wir merken den Account für die Automatik vor und senden den Antrag per Mail von {sender?.address}. Das lässt sich in Aufräumen jederzeit ändern.
+              </p>
+              <div className="grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
+                <Button variant="primary" className="h-11 gap-2 text-lg" onClick={() => answerQueue(true)}>Ja, vormerken <Kbd className="border-primary-fg/30 bg-transparent text-primary-fg/70">1</Kbd></Button>
+                <Button className="h-11 gap-2 text-lg" onClick={() => answerQueue(false)}>Nein, später <Kbd>2</Kbd></Button>
+              </div>
+              <label className="flex w-fit cursor-default items-center gap-2 text-base text-fg-muted">
+                <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} /> Für diese Sitzung merken
+              </label>
+            </div>
+          ) : (
+          <div className="flex flex-col gap-3 border-t border-border pt-6">
             <p className="text-lg font-medium">Hast du bei {a.name} einen Account?</p>
             <div className="grid grid-cols-3 gap-3 max-[640px]:grid-cols-1">
-              <Choice label={CHOICE_TEXT.yes} caption="Kommt zum Aufräumen" keyHint="1" primary onClick={() => decide("yes")} tip="Du hast oder hattest hier einen Account. Du kannst ihn später löschen. Taste 1 oder J." />
+              <Choice label={CHOICE_TEXT.yes} caption="Bestätigt den Fund. Löscht nichts." keyHint="1" primary onClick={() => decide("yes")} tip="Du hast oder hattest hier einen Account. Du kannst ihn später löschen. Taste 1 oder J." />
               <Choice label={CHOICE_TEXT.no} caption="Wird ausgeblendet" keyHint="2" onClick={() => decide("no")} tip="Du hast hier keinen Account. Der Fund verschwindet aus deiner Liste. Taste 2 oder N." />
               <Choice label={CHOICE_TEXT.skip} caption="Bleibt zu prüfen" keyHint="3" onClick={() => decide("skip")} tip="Du entscheidest später. Der Fund bleibt in der Liste. Taste 3 oder Leertaste." />
             </div>
           </div>
+          )}
 
           <div className="flex h-8 items-center justify-between text-sm text-fg-faint">
             {last && lastAccount ? (
               <span className="truncate">Zuletzt: {lastAccount.name}, {CHOICE_TEXT[last.choice]}</span>
             ) : <span>Tipp: Mit den Tasten 1, 2 und 3 geht es schneller.</span>}
+            {qc && sender && ask !== a.id && (
+              <span className="ml-auto flex items-center gap-1 whitespace-nowrap">
+                {qc === "yes" ? "Bestätigte Accounts werden vorgemerkt" : "Löschanträge entscheidest du in Aufräumen"}
+                <Button variant="ghost" size="sm" onClick={resetQueueChoice}>Wieder fragen</Button>
+              </span>
+            )}
             <Button variant="ghost" size="sm" onClick={() => navigate({ page: "accounts", id: a.id })}>Alle Details</Button>
           </div>
+
+          {upcoming.length > 0 && (
+            <section className="border-t border-border pt-4">
+              <SectionLabel right={<span className="tnum text-sm text-fg-faint">{plural(total - i - 1, "weiterer Fund", "weitere Funde")}</span>}>Als Nächstes</SectionLabel>
+              <ul className="mt-1 flex flex-col">
+                {upcoming.map((u) => (
+                  <li key={u.id} className="flex h-9 items-center gap-3 text-base text-fg-muted">
+                    <ServiceLogo name={u.name} domain={u.domain} size={20} />
+                    <span className="flex-1 truncate">{u.name}</span>
+                    <span className="text-sm text-fg-faint">{tierWord(u)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       </div>
     </div>

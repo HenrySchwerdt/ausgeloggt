@@ -5,7 +5,7 @@ import { api, runJob } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
 import { openUrl } from "@/lib/platform";
-import { findManualLinks, knownManualLinks, type ManualLinks } from "@/lib/manual-unsub";
+import { findManualLinks, knownManualLinks, needsRescan, UNSUB_REASON_TEXT, type ManualLinks } from "@/lib/manual-unsub";
 import {
   MAIL_CATEGORY_LABEL, SUBSCRIPTION_STATUS_LABEL, type MailCategory, type Subscription, type SubscriptionStatus,
   type UnsubscribeDonePayload,
@@ -92,7 +92,10 @@ export function NewsletterPage() {
     setBusy("unsub"); setResult(null);
     try {
       const d = await runJob<UnsubscribeDonePayload>(() => api.newsletters.unsubscribeStart(ids));
-      if (d.payload) setResult(d.payload);
+      if (d.payload) {
+        setResult(d.payload);
+        useStore.getState().setUnsubReasons(Object.fromEntries(d.payload.results.map((r) => [r.id, r.ok ? null : r.reason ?? null])));
+      }
       setSelected(new Set());
     } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); }
   }
@@ -347,11 +350,28 @@ function ManualFallback({ s, failed }: { s: Subscription; failed: boolean }) {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [opened, setOpened] = useState(false);
-  useEffect(() => { setFound(knownManualLinks(s)); setSearched(false); setOpened(false); }, [s.id]);
+  const [rescan, setRescan] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const reason = useStore((x) => x.unsubReasons[s.id]);
+  const mailbox = useStore((x) => x.snap?.mailboxes.find((m) => m.address === s.mailbox));
+  useEffect(() => { setFound(knownManualLinks(s)); setSearched(false); setOpened(false); setRescan(false); setSearchError(null); }, [s.id]);
 
   const search = async () => {
-    setSearching(true);
-    try { setFound(await findManualLinks(s)); setSearched(true); } catch (e) { toast.error(errorMessage(e)); } finally { setSearching(false); }
+    setSearching(true); setSearchError(null);
+    try { setFound(await findManualLinks(s)); setSearched(true); setRescan(false); }
+    catch (e) {
+      if (needsRescan(e)) setRescan(true);
+      else setSearchError(errorMessage(e));
+    } finally { setSearching(false); }
+  };
+  const scanMailbox = async () => {
+    if (!mailbox) { toast.error("Das Postfach dieser Liste ist nicht mehr eingerichtet."); return; }
+    setScanning(true);
+    try {
+      const d = await runJob(() => api.mail.scanStart([mailbox.id], false));
+      if (d.ok) { setRescan(false); await search(); }
+    } catch (e) { toast.error(errorMessage(e)); } finally { setScanning(false); }
   };
   const open = async (url: string) => {
     const ok = await confirm({
@@ -368,7 +388,9 @@ function ManualFallback({ s, failed }: { s: Subscription; failed: boolean }) {
   return (
     <section className="border-t border-border px-5 py-4">
       <h3 className="mb-2 text-sm font-medium text-fg-faint">Selbst abmelden</h3>
-      <p className="text-base">{failed ? "Automatisch ging nicht. So meldest du dich selbst ab:" : "Hier gibt es keine automatische Abmeldung. So meldest du dich selbst ab:"}</p>
+      <p className="text-base">{failed ? "Automatisch ging nicht." : "Hier gibt es keine automatische Abmeldung."}</p>
+      {failed && reason && <p className="mt-1 text-base text-fg-muted">{UNSUB_REASON_TEXT[reason]}</p>}
+      <p className="mt-1 text-base text-fg-muted">So meldest du dich selbst ab:</p>
       <ul className="mt-3 flex flex-col">
         {found.links.map((l) => (
           <li key={l.url} className="flex min-h-11 items-center gap-3 border-b border-border py-1.5 last:border-b-0">
@@ -390,9 +412,19 @@ function ManualFallback({ s, failed }: { s: Subscription; failed: boolean }) {
         )}
         {found.links.length === 0 && !found.mailto && <li className="text-base text-fg-muted">Der Absender nennt keine Abmeldung.{searched ? " Auch in der letzten Mail haben wir nichts gefunden." : ""}</li>}
       </ul>
-      <Button className="mt-3" variant="ghost" disabled={searching} onClick={() => void search()}>
-        {searching && <Loader2 className="animate-spin" />} Link aus der letzten Mail suchen
-      </Button>
+      {rescan ? (
+        <div className="anim-fade mt-3 flex flex-col items-start gap-2 rounded-md bg-muted px-3 py-2.5">
+          <p className="text-base">Für die Suche brauchen wir die letzte Mail dieses Absenders. Dafür muss das Postfach noch einmal geprüft werden.</p>
+          <Button variant="secondary" disabled={scanning} onClick={() => void scanMailbox()}>
+            {scanning && <Loader2 className="animate-spin" />} Postfach neu scannen
+          </Button>
+        </div>
+      ) : (
+        <Button className="mt-3" variant="ghost" disabled={searching} onClick={() => void search()}>
+          {searching && <Loader2 className="animate-spin" />} Link aus der letzten Mail suchen
+        </Button>
+      )}
+      {searchError && <p className="mt-2 flex items-start gap-2 text-sm text-fg-muted"><Dot className="mt-1.5 bg-s-red" />{searchError}</p>}
       {opened && (
         <div className="anim-fade mt-4 flex flex-col gap-2.5 border-t border-border pt-4">
           <p className="text-base font-medium">Hast du dich abgemeldet?</p>

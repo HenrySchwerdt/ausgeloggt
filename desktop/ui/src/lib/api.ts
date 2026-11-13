@@ -20,6 +20,9 @@ export interface Backend {
   requests: typeof ipc.requests;
   settings: typeof ipc.settings;
   jobs: typeof ipc.jobs;
+  sending: typeof ipc.sending;
+  automations: typeof ipc.automations;
+  unsubscribeFallback: typeof ipc.unsubscribeFallback;
   events: {
     onJobProgress(cb: (p: JobProgress) => void): Promise<Unlisten>;
     onJobDone(cb: (d: JobDone) => void): Promise<Unlisten>;
@@ -39,6 +42,7 @@ const real: Backend = {
   vault: ipc.vault, data: ipc.data, accounts: ipc.accounts, mail: ipc.mail, imports: ipc.imports,
   newsletters: ipc.newsletters, security: ipc.security, letters: ipc.letters, requests: ipc.requests,
   settings: ipc.settings, jobs: ipc.jobs,
+  sending: ipc.sending, automations: ipc.automations, unsubscribeFallback: ipc.unsubscribeFallback,
   events: {
     onJobProgress: ipc.onJobProgress, onJobDone: ipc.onJobDone, onVaultChanged: ipc.onVaultChanged,
     onVaultLocked: ipc.onVaultLocked, onSaveFailed: ipc.onSaveFailed, onScheduledRescan: ipc.onScheduledRescan,

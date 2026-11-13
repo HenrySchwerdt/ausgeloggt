@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Camera, Check, ExternalLink, FileUp, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
+import { Camera, ExternalLink, Inbox, FileUp, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, X } from "lucide-react";
 import { api, runJob } from "@/lib/api";
+import { EVERY_LABEL } from "@/lib/automation";
 import { useStore } from "@/lib/store";
 import { navigate } from "@/lib/router";
 import { IMAGE_EXT, openUrl, pickFiles } from "@/lib/platform";
@@ -95,7 +96,7 @@ export function SourcesPage() {
         )}
         <Panel className="mt-1">
           {snap.mailboxes.length === 0 ? (
-            <EmptyState icon={Check} className="py-12" title="Kein Postfach verbunden"
+            <EmptyState icon={Inbox} className="py-12" title="Kein Postfach verbunden"
               description="Mit einem Postfach findet ausgeloggt Accounts, Newsletter und Abos. Die Mails bleiben auf deinem Gerät."
               action={<Button variant="primary" onClick={() => setWizard(true)}>Postfach hinzufügen</Button>} />
           ) : snap.mailboxes.map((m) => <MailboxRow key={m.id} m={m} busy={scanning || !!scanJob} onScan={(full) => void scan([m.id], full)} />)}
@@ -118,7 +119,7 @@ export function SourcesPage() {
           <button onClick={() => aiVision ? void choose("images") : navigate({ page: "settings", section: "ai" })} className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-muted">
             <Camera className="size-5 text-fg-muted" strokeWidth={1.5} />
             <span className="text-base font-medium">Screenshots lesen</span>
-            <span className="text-sm text-fg-muted">{aiVision ? "Zum Beispiel die Liste unter Apple, Mit Apple anmelden. Du bestätigst jeden Treffer." : "Dafür muss eine KI mit Bildverständnis aktiv sein. Zu den Einstellungen."}</span>
+            <span className="text-sm text-fg-muted">{aiVision ? "Zum Beispiel die Liste unter Apple, Mit Apple anmelden. Du bestätigst jeden Treffer." : "Wähle dafür in den Einstellungen Claude, ChatGPT oder ein Ollama Bildmodell."}</span>
           </button>
         </div>
       </section>
@@ -176,17 +177,20 @@ export function SourcesPage() {
 
 function MailboxRow({ m, busy, onScan }: { m: Mailbox; busy: boolean; onScan(full: boolean): void }) {
   const [testing, setTesting] = useState(false);
+  const rule = useStore((s) => s.snap?.automations?.find((r) => r.mailbox_id === m.id));
+  const auto = rule?.enabled ? `Automatik ${(EVERY_LABEL[rule.every_days] ?? "").toLowerCase()}` : "";
   return (
     <div className="flex min-h-[52px] items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0">
       <div className="min-w-0 flex-1">
         <div className="truncate text-base font-medium leading-[18px]">{m.address}</div>
-        <div className="truncate text-sm leading-4 text-fg-muted">{m.imap_host}, {m.last_scan ? `zuletzt geprüft ${relativeDays(m.last_scan)}` : "noch nicht geprüft"}{!m.has_password ? ", Passwort fehlt" : ""}</div>
+        <div className="truncate text-sm leading-4 text-fg-muted">{m.imap_host}, {m.last_scan ? `zuletzt geprüft ${relativeDays(m.last_scan)}` : "noch nicht geprüft"}{!m.has_password ? ", Passwort fehlt" : ""}{auto ? `, ${auto}` : ""}</div>
       </div>
       <Button variant="secondary" disabled={busy} onClick={() => onScan(false)}>Prüfen</Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Weitere Aktionen"><MoreHorizontal /></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem disabled={busy} onSelect={() => onScan(true)}>Komplett neu prüfen</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => navigate({ page: "settings", section: "automation" })}>Automatik einrichten</DropdownMenuItem>
           <DropdownMenuItem disabled={testing} onSelect={async () => {
             setTesting(true);
             try { const f = await api.mail.testSaved(m.id); toast(`Verbindung steht, ${plural(f.length, "Ordner", "Ordner")} gefunden`); } catch (e) { toast.error(errorMessage(e)); } finally { setTesting(false); }

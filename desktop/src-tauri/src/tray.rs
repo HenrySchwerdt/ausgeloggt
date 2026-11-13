@@ -1,13 +1,12 @@
-//! System tray: Öffnen, Jetzt prüfen, Sperren, Beenden. Not unit-tested (needs a window
-//! system); the decisions behind it (`AppState::hint`, `automation::run_enabled_now`) are.
+//! System tray: Öffnen, Jetzt scannen, Sperren, Beenden. Not unit-tested (needs a window
+//! system); the decisions behind it (`AppState::hint`, `scan::start_scan`) are.
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::automation;
 use crate::state::AppState;
-use crate::work::{scan, send};
+use crate::work::scan;
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -19,7 +18,7 @@ fn show_main(app: &AppHandle) {
 
 pub fn build(app: &tauri::App, state: AppState) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Öffnen", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, "check", "Jetzt prüfen", true, None::<&str>)?;
+    let check = MenuItem::with_id(app, "check", "Jetzt scannen", true, None::<&str>)?;
     let lock = MenuItem::with_id(app, "lock", "Sperren", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &check, &lock, &quit])?;
@@ -30,9 +29,8 @@ pub fn build(app: &tauri::App, state: AppState) -> tauri::Result<()> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "open" => show_main(app),
             "check" => {
-                if let Err(e) =
-                    automation::run_enabled_now(&state, send::real_sender(), scan::imap_scanner())
-                {
+                // Only rescans all mailboxes (empty list = all). Never sends anything.
+                if let Err(e) = scan::start_scan(&state, Vec::new(), false, scan::imap_scanner()) {
                     state.host.notify("ausgeloggt", &e.message);
                 }
             }

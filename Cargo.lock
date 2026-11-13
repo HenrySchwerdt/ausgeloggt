@@ -286,7 +286,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "ausgeloggt-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-core",
  "log",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-breach"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-core",
  "chrono",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-catalog"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-core",
  "chrono",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-ai",
  "ausgeloggt-breach",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-e2e"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-catalog",
  "ausgeloggt-core",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-import"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-core",
  "chrono",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-letters"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-catalog",
  "ausgeloggt-core",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "ausgeloggt-mail"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ausgeloggt-core",
  "chrono",

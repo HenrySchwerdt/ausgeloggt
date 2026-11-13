@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ExternalLink, Loader2, Server } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Mail, Server } from "lucide-react";
+import { brandPath } from "@/lib/brand";
 import { api } from "@/lib/api";
 import { openUrl } from "@/lib/platform";
 import { useAsync } from "@/lib/hooks";
@@ -13,7 +14,9 @@ import { DialogFooter } from "./ui/dialog";
 import { Input } from "./ui/input";
 
 export function ProviderLogo({ p, size = 28 }: { p: { name: string; domain: string; logo?: string }; size?: number }) {
-  if (!p.logo && !p.domain) return <span className="flex shrink-0 items-center justify-center rounded-md bg-muted text-fg-muted" style={{ width: size, height: size }} aria-hidden><Server className="size-3.5" /></span>;
+  // Providers without a known logo get a neutral mail icon instead of a letter.
+  const plain = !p.logo && !p.domain ? Server : !p.logo && !brandPath(p.name, p.domain) ? Mail : null;
+  if (plain) { const I = plain; return <span className="flex shrink-0 items-center justify-center rounded-md bg-muted text-fg-muted" style={{ width: size, height: size }} aria-hidden><I className="size-3.5" /></span>; }
   return <ServiceLogo name={p.logo ?? p.name} domain={p.logo ? `${p.logo}.com` : p.domain || "x.invalid"} size={size} />;
 }
 

@@ -15,7 +15,7 @@ deadline tracking). Everything runs locally and is stored in one encrypted vault
 | `crates/ausgeloggt-catalog` | Deletion catalog (link, difficulty, contact), 2FA directory, credit bureaus / address brokers, data-protection authorities, help links, GDPR erasure letters |
 | `crates/ausgeloggt-breach` | Have I Been Pwned: Pwned Passwords (k-anonymity), breach catalogue, optional per-address lookups |
 | `crates/ausgeloggt-letters` | Letters as `LetterDoc`, rendered to text or DIN 5008 PDF; legacy kit, privacy report |
-| `crates/ausgeloggt-ai` | Optional AI: newsletter classification, uncertain accounts, SSO screenshot reading, receipt fallback. Local via Ollama or opt-in Anthropic API |
+| `crates/ausgeloggt-ai` | Optional AI: newsletter classification, uncertain accounts, SSO screenshot reading, receipt fallback. Local via Ollama, or opt-in Claude (Claude Code CLI) and ChatGPT (Codex CLI) on the user's own login, no API keys |
 | `desktop/src-tauri` | Tauri shell: holds the unlocked vault, exposes the crates as typed IPC commands, background jobs with progress events, logo cache |
 | `desktop/ui` | UI: React + TypeScript + Vite + Tailwind v4 + shadcn/ui (Radix) + lucide-react. Also runs in the browser with a mock API and demo data (screenshots / design iteration) |
 

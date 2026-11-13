@@ -1,6 +1,6 @@
 [package]
 name = "ausgeloggt-ai"
-description = "Optionale KI-Klassifizierung (lokal per Ollama oder Anthropic API)"
+description = "Optionale KI-Klassifizierung (lokal per Ollama, oder Claude Code und Codex über das eigene Konto)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

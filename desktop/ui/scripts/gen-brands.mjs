@@ -15,7 +15,7 @@ lastpass bitwarden 1password dashlane protonmail openai patreon kickstarter word
 stackoverflow kaggle tesla bmw volkswagen linktree miro clickup airtable framer postman sentry plex primevideo disneyplus ea ubisoft
 unity tumblr threads bluesky mastodon paypal klarna sumup mastercard visa audible goodreads imdb letterboxd bandcamp twitter lyft
 bolt flixbus hm mediamarkt ing commerzbank deutschetelekom vodafone o2 samsung sony nvidia intel amd steelseries logitech razer corsair
-onedrive opera firefoxbrowser googlechrome brave duckduckgo proton nordvpn expressvpn surfshark`.split(/\s+/);
+gmx webdotde onedrive opera firefoxbrowser googlechrome brave duckduckgo proton nordvpn expressvpn surfshark`.split(/\s+/);
 
 const seen = new Set();
 const lines = [];

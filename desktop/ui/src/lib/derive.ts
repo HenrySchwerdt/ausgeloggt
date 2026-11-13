@@ -23,7 +23,7 @@ export const realDomain = (d: string) => (d.startsWith("unresolved:") ? null : d
 // ---- how sure are we ----------------------------------------------------------------
 
 export type Tier = "high" | "mid" | "low";
-export const TIER_LABEL: Record<Tier, string> = { high: "Sicher", mid: "Wahrscheinlich", low: "Unsicher" };
+export const TIER_LABEL: Record<Tier, string> = { high: "Eindeutig", mid: "Wahrscheinlich", low: "Unklar" };
 
 const WEAK_KINDS = new Set<EvidenceKind>(["Newsletter", "OtherMail"]);
 

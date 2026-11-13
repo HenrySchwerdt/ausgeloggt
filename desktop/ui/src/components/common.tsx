@@ -67,6 +67,10 @@ export function Dot({ className }: { className?: string }) {
   return <span className={cn("inline-block size-1.5 shrink-0 rounded-full", className)} />;
 }
 
+export function riskLabel(score: number): string {
+  return score >= 60 ? "Hohes Risiko" : score >= 30 ? "Mittleres Risiko" : "Geringes Risiko";
+}
+
 export function riskDot(score: number): string {
   return score >= 60 ? "bg-s-red" : score >= 30 ? "bg-s-yellow" : "bg-s-gray";
 }

@@ -14,6 +14,8 @@ use crate::error::{IpcError, IpcResult};
 
 /// Keys that must never be accepted from or sent to the UI.
 const SECRET_SETTING_KEYS: [&str; 2] = ["hibp_api_key", "has_hibp_key"];
+/// AI needs no secrets any more (Claude Code / Codex use their own login). Old vaults
+/// may still carry an Anthropic key field: never accepted, dropped on the next save.
 const SECRET_AI_KEYS: [&str; 2] = ["anthropic_api_key", "has_anthropic_key"];
 
 fn to_value<T: Serialize>(v: &T) -> IpcResult<Value> {
@@ -40,10 +42,6 @@ pub fn settings_dto(s: &Settings) -> IpcResult<Value> {
             for k in SECRET_AI_KEYS {
                 ai.remove(k);
             }
-            ai.insert(
-                "has_anthropic_key".into(),
-                json!(!s.ai.anthropic_api_key.is_empty()),
-            );
         }
     }
     Ok(v)
@@ -370,7 +368,6 @@ mod tests {
     fn data_with_secrets() -> VaultData {
         let mut d = VaultData::default();
         d.settings.hibp_api_key = "HIBP-SECRET-123".into();
-        d.settings.ai.anthropic_api_key = "sk-ant-SECRET-456".into();
         d.mailboxes.push(MailboxConfig {
             id: uuid::Uuid::new_v4(),
             address: "me@example.org".into(),
@@ -391,7 +388,7 @@ mod tests {
         let d = data_with_secrets();
         let v = snapshot(&d).unwrap();
         let text = v.to_string();
-        for secret in ["HIBP-SECRET-123", "sk-ant-SECRET-456", "MAILBOX-SECRET-789"] {
+        for secret in ["HIBP-SECRET-123", "MAILBOX-SECRET-789"] {
             assert!(!text.contains(secret), "{secret} leaked");
         }
         assert!(!text.contains("hibp_api_key"));
@@ -399,7 +396,6 @@ mod tests {
         assert!(v["mailboxes"][0].get("password").is_none());
         assert_eq!(v["mailboxes"][0]["has_password"], true);
         assert_eq!(v["settings"]["has_hibp_key"], true);
-        assert_eq!(v["settings"]["ai"]["has_anthropic_key"], true);
         assert_eq!(v["accounts"][0]["domain"], "spotify.com");
         // other settings survive
         assert_eq!(v["settings"]["auto_lock_minutes"], 10);
@@ -409,7 +405,6 @@ mod tests {
     fn flags_are_false_when_nothing_is_set() {
         let v = snapshot(&VaultData::default()).unwrap();
         assert_eq!(v["settings"]["has_hibp_key"], false);
-        assert_eq!(v["settings"]["ai"]["has_anthropic_key"], false);
     }
 
     #[test]
@@ -424,7 +419,7 @@ mod tests {
         let s = apply_settings_patch(&d.settings, &patch).unwrap();
         assert_eq!(s.full_name, "Erika Muster");
         assert_eq!(s.ai.provider, ausgeloggt_core::AiProvider::Ollama);
-        assert_eq!(s.ai.anthropic_api_key, "sk-ant-SECRET-456");
+        assert!(!serde_json::to_string(&s).unwrap().contains("evil\""), "AI key field must not be stored");
         assert_eq!(s.hibp_api_key, "HIBP-SECRET-123");
         assert_eq!(s.identity.city, "Berlin");
         assert_eq!(s.identity.country, "Deutschland");

@@ -18,8 +18,6 @@ use crate::error::{IpcError, IpcResult};
 use crate::jobs::{JobCtx, JobFail, JobOutcome, JobResult};
 use crate::state::AppState;
 
-/// Anthropic models offered in the settings dropdown (the key decides what is usable).
-pub const ANTHROPIC_MODELS: [&str; 3] = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5"];
 
 // ---- classification ---------------------------------------------------------------
 
@@ -312,9 +310,11 @@ pub fn list_models(ai: &AiSettings) -> IpcResult<Value> {
             let vision = ausgeloggt_ai::vision::ollama_vision_models(&ai.ollama_url)?;
             Ok(json!({ "text": text, "vision": vision }))
         }
-        AiProvider::Anthropic => Ok(json!({
-            "text": ANTHROPIC_MODELS, "vision": ANTHROPIC_MODELS,
+        AiProvider::ClaudeCode => Ok(json!({
+            "text": ausgeloggt_ai::cli::CLAUDE_MODELS, "vision": ausgeloggt_ai::cli::CLAUDE_MODELS,
         })),
+        // Codex picks its model from the ChatGPT plan; empty list = "Standard".
+        AiProvider::Codex => Ok(json!({ "text": [], "vision": [] })),
     }
 }
 
@@ -552,7 +552,7 @@ mod tests {
             list_models(&ai).unwrap()["text"].as_array().unwrap().len(),
             0
         );
-        ai.provider = AiProvider::Anthropic;
+        ai.provider = AiProvider::ClaudeCode;
         assert!(
             list_models(&ai).unwrap()["vision"]
                 .as_array()
