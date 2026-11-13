@@ -17,7 +17,10 @@ use std::time::Duration;
 use ausgeloggt_core::{AiProvider, AiSettings, PaymentKind, SsoProvider};
 use serde_json::{json, Value};
 
-use crate::{cli, cli_for, extract_json, ollama_chat_body, ollama_models, pick_ollama_model, transport, AiError};
+use crate::{
+    cli, cli_for, extract_json, ollama_chat_body, ollama_models, pick_ollama_model, transport,
+    AiError,
+};
 
 /// Maximum accepted image size.
 pub const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -311,8 +314,20 @@ pub fn read_sso_screenshot(
         }
         AiProvider::ClaudeCode | AiProvider::Codex => {
             let (c, model) = cli_for(settings).expect("cloud provider");
-            let img = cli::Image { bytes: image, mime, b64: &b64 };
-            cli::complete(c, model, SCREENSHOT_SYSTEM_PROMPT, SCREENSHOT_USER_PROMPT, &schema, Some(&img), Duration::from_secs(240))?
+            let img = cli::Image {
+                bytes: image,
+                mime,
+                b64: &b64,
+            };
+            cli::complete(
+                c,
+                model,
+                SCREENSHOT_SYSTEM_PROMPT,
+                SCREENSHOT_USER_PROMPT,
+                &schema,
+                Some(&img),
+                Duration::from_secs(240),
+            )?
         }
     };
     parse_screenshot(&raw)
@@ -1072,7 +1087,14 @@ mod tests {
         assert_eq!(o["messages"][1]["images"], json!(["QUJD"]));
         assert!(o["messages"][0].get("images").is_none());
 
-        let line = cli::claude_input("usr", Some(&cli::Image { bytes: b"ABC", mime: "image/png", b64: "QUJD" }));
+        let line = cli::claude_input(
+            "usr",
+            Some(&cli::Image {
+                bytes: b"ABC",
+                mime: "image/png",
+                b64: "QUJD",
+            }),
+        );
         let c: Value = serde_json::from_str(line.trim()).unwrap();
         let c = &c["message"]["content"];
         assert_eq!(c[0]["source"]["media_type"], json!("image/png"));

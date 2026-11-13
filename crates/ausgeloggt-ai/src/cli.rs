@@ -92,7 +92,8 @@ pub fn strict_schema(schema: &Value) -> Value {
         match v {
             Value::Object(m) => {
                 if m.get("type").and_then(Value::as_str) == Some("object") {
-                    m.entry("additionalProperties").or_insert(Value::Bool(false));
+                    m.entry("additionalProperties")
+                        .or_insert(Value::Bool(false));
                 }
                 for (_, c) in m.iter_mut() {
                     walk(c);
@@ -111,12 +112,30 @@ pub fn strict_schema(schema: &Value) -> Value {
 // ---------------------------------------------------------------------------
 
 pub fn claude_args(model: &str, system: &str, schema: &Value) -> Vec<String> {
-    let model = if model.trim().is_empty() { DEFAULT_CLAUDE_MODEL } else { model.trim() };
+    let model = if model.trim().is_empty() {
+        DEFAULT_CLAUDE_MODEL
+    } else {
+        model.trim()
+    };
     [
-        "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-        "--json-schema", &strict_schema(schema).to_string(),
-        "--tools", "", "--no-session-persistence", "--strict-mcp-config", "--setting-sources", "",
-        "--system-prompt", system, "--model", model,
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        &strict_schema(schema).to_string(),
+        "--tools",
+        "",
+        "--no-session-persistence",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--system-prompt",
+        system,
+        "--model",
+        model,
     ]
     .iter()
     .map(|s| s.to_string())
@@ -142,10 +161,20 @@ pub fn parse_claude_output(stdout: &str) -> Result<Value, AiError> {
         .filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
         .find(|v| v.get("type").and_then(Value::as_str) == Some("result"))
         .ok_or_else(|| AiError::BadResponse("Claude Code hat kein Ergebnis geliefert".into()))?;
-    let is_error = result.get("is_error").and_then(Value::as_bool).unwrap_or(false)
-        || result.get("subtype").and_then(Value::as_str).is_some_and(|s| s != "success");
+    let is_error = result
+        .get("is_error")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || result
+            .get("subtype")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s != "success");
     if is_error {
-        let text = result.get("result").and_then(Value::as_str).unwrap_or("").to_string();
+        let text = result
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         return Err(classify_failure(Cli::Claude, &text));
     }
     if let Some(v) = result.get("structured_output").filter(|v| v.is_object()) {
@@ -160,10 +189,22 @@ pub fn parse_claude_output(stdout: &str) -> Result<Value, AiError> {
 // Codex
 // ---------------------------------------------------------------------------
 
-pub fn codex_args(model: &str, schema_file: &Path, out_file: &Path, image_file: Option<&Path>) -> Vec<String> {
+pub fn codex_args(
+    model: &str,
+    schema_file: &Path,
+    out_file: &Path,
+    image_file: Option<&Path>,
+) -> Vec<String> {
     let mut a: Vec<String> = [
-        "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
-        "--sandbox", "read-only", "--color", "never",
+        "exec",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -196,15 +237,30 @@ pub fn codex_prompt(system: &str, user: &str) -> String {
 /// Turn CLI error text into a clear German message.
 pub fn classify_failure(cli: Cli, text: &str) -> AiError {
     let t = text.to_lowercase();
-    if t.contains("not logged in") || t.contains("/login") || t.contains("login") && t.contains("please")
-        || t.contains("unauthorized") || t.contains("401") || t.contains("authentication")
+    if t.contains("not logged in")
+        || t.contains("/login")
+        || t.contains("login") && t.contains("please")
+        || t.contains("unauthorized")
+        || t.contains("401")
+        || t.contains("authentication")
     {
         return AiError::Request(cli.login_hint().into());
     }
-    if t.contains("usage limit") || t.contains("rate limit") || t.contains("limit reached") || t.contains("429") {
-        return AiError::Request(format!("{} meldet: Nutzungslimit erreicht. Versuche es später erneut.", cli.label()));
+    if t.contains("usage limit")
+        || t.contains("rate limit")
+        || t.contains("limit reached")
+        || t.contains("429")
+    {
+        return AiError::Request(format!(
+            "{} meldet: Nutzungslimit erreicht. Versuche es später erneut.",
+            cli.label()
+        ));
     }
-    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("unbekannter Fehler");
+    let first = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("unbekannter Fehler");
     let first: String = first.chars().take(200).collect();
     AiError::Request(format!("{} fehlgeschlagen: {first}", cli.label()))
 }
@@ -216,9 +272,16 @@ pub fn classify_failure(cli: Cli, text: &str) -> AiError {
 /// Locate the CLI: PATH first, then the usual install locations (a GUI app often starts
 /// with a shorter PATH than a terminal).
 pub fn find(cli: Cli) -> Option<PathBuf> {
-    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ""] } else { &[""] };
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let exts: &[&str] = if cfg!(windows) {
+        &[".exe", ".cmd", ""]
+    } else {
+        &[""]
+    };
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    let home =
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
     if let Some(h) = &home {
         dirs.push(h.join(".local").join("bin"));
         dirs.push(h.join(".claude").join("local"));
@@ -230,7 +293,13 @@ pub fn find(cli: Cli) -> Option<PathBuf> {
             dirs.push(PathBuf::from(a).join("npm"));
         }
         if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-            dirs.push(PathBuf::from(&l).join("Programs").join("OpenAI").join("Codex").join("bin"));
+            dirs.push(
+                PathBuf::from(&l)
+                    .join("Programs")
+                    .join("OpenAI")
+                    .join("Codex")
+                    .join("bin"),
+            );
             dirs.push(PathBuf::from(&l).join("Programs").join("claude"));
         }
     } else {
@@ -254,10 +323,20 @@ struct Output {
     stderr: String,
 }
 
-fn run(cli: Cli, args: &[String], stdin: &str, cwd: &Path, timeout: Duration) -> Result<Output, AiError> {
+fn run(
+    cli: Cli,
+    args: &[String],
+    stdin: &str,
+    cwd: &Path,
+    timeout: Duration,
+) -> Result<Output, AiError> {
     let bin = find(cli).ok_or_else(|| AiError::Request(cli.install_hint().into()))?;
     let mut cmd = Command::new(&bin);
-    cmd.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     for k in STRIPPED_ENV {
         cmd.env_remove(k);
     }
@@ -267,7 +346,9 @@ fn run(cli: Cli, args: &[String], stdin: &str, cwd: &Path, timeout: Duration) ->
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = cmd.spawn().map_err(|e| AiError::Request(format!("{} ließ sich nicht starten: {e}", cli.label())))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| AiError::Request(format!("{} ließ sich nicht starten: {e}", cli.label())))?;
     if let Some(mut si) = child.stdin.take() {
         let data = stdin.to_string();
         std::thread::spawn(move || {
@@ -288,13 +369,19 @@ fn run(cli: Cli, args: &[String], stdin: &str, cwd: &Path, timeout: Duration) ->
     });
     let start = Instant::now();
     let status = loop {
-        if let Some(st) = child.try_wait().map_err(|e| AiError::Request(e.to_string()))? {
+        if let Some(st) = child
+            .try_wait()
+            .map_err(|e| AiError::Request(e.to_string()))?
+        {
             break st;
         }
         if start.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(AiError::Request(format!("{} hat nicht rechtzeitig geantwortet", cli.label())));
+            return Err(AiError::Request(format!(
+                "{} hat nicht rechtzeitig geantwortet",
+                cli.label()
+            )));
         }
         std::thread::sleep(Duration::from_millis(50));
     };
@@ -309,8 +396,10 @@ fn run(cli: Cli, args: &[String], stdin: &str, cwd: &Path, timeout: Duration) ->
 struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> Result<Self, AiError> {
-        let p = std::env::temp_dir().join(format!("ausgeloggt-ai-{}-{}", std::process::id(), nanos()));
-        std::fs::create_dir_all(&p).map_err(|e| AiError::Request(format!("Temporärer Ordner: {e}")))?;
+        let p =
+            std::env::temp_dir().join(format!("ausgeloggt-ai-{}-{}", std::process::id(), nanos()));
+        std::fs::create_dir_all(&p)
+            .map_err(|e| AiError::Request(format!("Temporärer Ordner: {e}")))?;
         Ok(Self(p))
     }
 }
@@ -320,7 +409,10 @@ impl Drop for TempDir {
     }
 }
 fn nanos() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 /// Structured completion through one of the CLIs.
@@ -336,19 +428,32 @@ pub fn complete(
     let dir = TempDir::new()?;
     match cli {
         Cli::Claude => {
-            let out = run(cli, &claude_args(model, system, schema), &claude_input(user, image), &dir.0, timeout)?;
+            let out = run(
+                cli,
+                &claude_args(model, system, schema),
+                &claude_input(user, image),
+                &dir.0,
+                timeout,
+            )?;
             match parse_claude_output(&out.stdout) {
-                Err(AiError::BadResponse(_)) if !out.status_ok && !out.stderr.trim().is_empty() => Err(classify_failure(cli, &out.stderr)),
+                Err(AiError::BadResponse(_)) if !out.status_ok && !out.stderr.trim().is_empty() => {
+                    Err(classify_failure(cli, &out.stderr))
+                }
                 r => r,
             }
         }
         Cli::Codex => {
             let schema_file = dir.0.join("schema.json");
             let out_file = dir.0.join("answer.json");
-            std::fs::write(&schema_file, strict_schema(schema).to_string()).map_err(|e| AiError::Request(e.to_string()))?;
+            std::fs::write(&schema_file, strict_schema(schema).to_string())
+                .map_err(|e| AiError::Request(e.to_string()))?;
             let image_file = match image {
                 Some(img) => {
-                    let p = dir.0.join(if img.mime == "image/png" { "bild.png" } else { "bild.jpg" });
+                    let p = dir.0.join(if img.mime == "image/png" {
+                        "bild.png"
+                    } else {
+                        "bild.jpg"
+                    });
                     std::fs::write(&p, img.bytes).map_err(|e| AiError::Request(e.to_string()))?;
                     Some(p)
                 }
@@ -358,7 +463,11 @@ pub fn complete(
             let out = run(cli, &args, &codex_prompt(system, user), &dir.0, timeout)?;
             let answer = std::fs::read_to_string(&out_file).unwrap_or_default();
             if answer.trim().is_empty() {
-                let text = if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr };
+                let text = if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                };
                 return Err(classify_failure(cli, text));
             }
             crate::extract_json(&answer)
@@ -382,7 +491,10 @@ pub fn parse_status(cli: Cli, stdout: &str, stderr: &str, ok: bool) -> Result<St
         Cli::Claude => {
             let v: Value = serde_json::from_str(stdout.trim()).unwrap_or(Value::Null);
             if v.get("loggedIn").and_then(Value::as_bool) == Some(true) {
-                let api = v.get("authMethod").and_then(Value::as_str).is_some_and(|m| m.contains("api") || m.contains("key"));
+                let api = v
+                    .get("authMethod")
+                    .and_then(Value::as_str)
+                    .is_some_and(|m| m.contains("api") || m.contains("key"));
                 if api {
                     return Ok("Claude Code ist mit einem API Schlüssel angemeldet. Für dein Abo melde dich in Claude Code mit deinem Claude Konto an.".into());
                 }
@@ -415,7 +527,10 @@ mod tests {
     fn strict_schema_closes_every_object() {
         let s = strict_schema(&crate::classification_schema());
         assert_eq!(s["additionalProperties"], false);
-        assert_eq!(s["properties"]["items"]["items"]["additionalProperties"], false);
+        assert_eq!(
+            s["properties"]["items"]["items"]["additionalProperties"],
+            false
+        );
         // Explicit values are kept.
         let t = strict_schema(&json!({"type": "object", "additionalProperties": true}));
         assert_eq!(t["additionalProperties"], true);
@@ -431,12 +546,19 @@ mod tests {
         assert_eq!(a[pos("--system-prompt") + 1], "sys");
         assert!(a.contains(&"--no-session-persistence".to_string()));
         assert!(a[pos("--json-schema") + 1].contains("\"additionalProperties\":false"));
-        assert_eq!(claude_args(" sonnet ", "s", &json!({}))[pos("--model") + 1], "sonnet");
+        assert_eq!(
+            claude_args(" sonnet ", "s", &json!({}))[pos("--model") + 1],
+            "sonnet"
+        );
     }
 
     #[test]
     fn claude_input_with_image() {
-        let img = Image { bytes: b"x", mime: "image/png", b64: "eA==" };
+        let img = Image {
+            bytes: b"x",
+            mime: "image/png",
+            b64: "eA==",
+        };
         let line = claude_input("hallo", Some(&img));
         assert!(line.ends_with('\n'));
         let v: Value = serde_json::from_str(line.trim()).unwrap();
@@ -454,36 +576,76 @@ mod tests {
         let text = "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"```json\\n{\\\"a\\\":1}\\n```\"}";
         assert_eq!(parse_claude_output(text).unwrap()["a"], 1);
         let login = "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"result\":\"Not logged in · Please run /login\"}";
-        assert!(parse_claude_output(login).unwrap_err().to_string().contains("nicht angemeldet"));
+        assert!(parse_claude_output(login)
+            .unwrap_err()
+            .to_string()
+            .contains("nicht angemeldet"));
         assert!(parse_claude_output("garbage").is_err());
     }
 
     #[test]
     fn codex_args_shape() {
-        let a = codex_args("", Path::new("s.json"), Path::new("o.json"), Some(Path::new("b.png")));
+        let a = codex_args(
+            "",
+            Path::new("s.json"),
+            Path::new("o.json"),
+            Some(Path::new("b.png")),
+        );
         assert_eq!(a[0], "exec");
-        for f in ["--ephemeral", "--ignore-user-config", "--skip-git-repo-check"] {
+        for f in [
+            "--ephemeral",
+            "--ignore-user-config",
+            "--skip-git-repo-check",
+        ] {
             assert!(a.contains(&f.to_string()), "{f}");
         }
-        assert_eq!(a[a.iter().position(|x| x == "--sandbox").unwrap() + 1], "read-only");
+        assert_eq!(
+            a[a.iter().position(|x| x == "--sandbox").unwrap() + 1],
+            "read-only"
+        );
         assert!(!a.contains(&"-m".to_string()));
         assert_eq!(a.last().unwrap(), "-");
-        assert!(codex_args("gpt-5.5", Path::new("s"), Path::new("o"), None).contains(&"gpt-5.5".to_string()));
+        assert!(codex_args("gpt-5.5", Path::new("s"), Path::new("o"), None)
+            .contains(&"gpt-5.5".to_string()));
     }
 
     #[test]
     fn failures_are_explained() {
-        assert!(classify_failure(Cli::Codex, "Error: 401 Unauthorized").to_string().contains("codex login"));
-        assert!(classify_failure(Cli::Claude, "You've hit your usage limit").to_string().contains("Nutzungslimit"));
-        assert!(classify_failure(Cli::Claude, "\n  boom\nmore").to_string().contains("boom"));
+        assert!(classify_failure(Cli::Codex, "Error: 401 Unauthorized")
+            .to_string()
+            .contains("codex login"));
+        assert!(classify_failure(Cli::Claude, "You've hit your usage limit")
+            .to_string()
+            .contains("Nutzungslimit"));
+        assert!(classify_failure(Cli::Claude, "\n  boom\nmore")
+            .to_string()
+            .contains("boom"));
     }
 
     #[test]
     fn status_parsing() {
-        assert!(parse_status(Cli::Claude, "{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}", "", true).unwrap().contains("Claude Konto"));
-        assert!(parse_status(Cli::Claude, "{\"loggedIn\":true,\"authMethod\":\"api_key\"}", "", true).unwrap().contains("API Schlüssel"));
+        assert!(parse_status(
+            Cli::Claude,
+            "{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}",
+            "",
+            true
+        )
+        .unwrap()
+        .contains("Claude Konto"));
+        assert!(parse_status(
+            Cli::Claude,
+            "{\"loggedIn\":true,\"authMethod\":\"api_key\"}",
+            "",
+            true
+        )
+        .unwrap()
+        .contains("API Schlüssel"));
         assert!(parse_status(Cli::Claude, "{\"loggedIn\":false}", "", false).is_err());
-        assert!(parse_status(Cli::Codex, "Logged in using ChatGPT", "", true).unwrap().contains("ChatGPT"));
+        assert!(
+            parse_status(Cli::Codex, "Logged in using ChatGPT", "", true)
+                .unwrap()
+                .contains("ChatGPT")
+        );
         assert!(parse_status(Cli::Codex, "Not logged in", "", false).is_err());
     }
 

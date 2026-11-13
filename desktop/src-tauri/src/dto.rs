@@ -419,7 +419,10 @@ mod tests {
         let s = apply_settings_patch(&d.settings, &patch).unwrap();
         assert_eq!(s.full_name, "Erika Muster");
         assert_eq!(s.ai.provider, ausgeloggt_core::AiProvider::Ollama);
-        assert!(!serde_json::to_string(&s).unwrap().contains("evil\""), "AI key field must not be stored");
+        assert!(
+            !serde_json::to_string(&s).unwrap().contains("evil\""),
+            "AI key field must not be stored"
+        );
         assert_eq!(s.hibp_api_key, "HIBP-SECRET-123");
         assert_eq!(s.identity.city, "Berlin");
         assert_eq!(s.identity.country, "Deutschland");

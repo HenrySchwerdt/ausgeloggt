@@ -18,7 +18,6 @@ use crate::error::{IpcError, IpcResult};
 use crate::jobs::{JobCtx, JobFail, JobOutcome, JobResult};
 use crate::state::AppState;
 
-
 // ---- classification ---------------------------------------------------------------
 
 pub type Classifier = dyn Fn(&AiSettings, &[Subscription]) -> Result<Vec<SubscriptionVerdict>, ausgeloggt_ai::AiError>
